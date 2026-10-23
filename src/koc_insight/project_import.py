@@ -21,7 +21,7 @@ def validate_plan(plan):
         names.add(name)
         if fields.get("来源键") != 1 or not 1 <= len(fields) <= 100:
             raise ValueError("需要文本来源键")
-        if any(t not in (1, 2, 15) for t in fields.values()):
+        if any(t not in (1, 2, 3, 5, 15, 17) for t in fields.values()):
             raise ValueError("不支持的迁移字段类型")
         keys = set()
         for row in table["records"]:
@@ -31,10 +31,21 @@ def validate_plan(plan):
             keys.add(key)
             for label, value in row.items():
                 kind = fields[label]
-                if kind == 1 and (not isinstance(value, str) or len(value) > 20000):
+                if kind in (1, 3) and (
+                    not isinstance(value, str) or len(value) > 20000
+                ):
                     raise ValueError("文本字段无效或过长")
-                if kind == 2 and (type(value) not in (int, float)):
+                if kind in (2, 5) and (type(value) not in (int, float)):
                     raise ValueError("数值字段无效")
+                if kind == 17 and (
+                    not isinstance(value, list)
+                    or any(
+                        not isinstance(v, dict)
+                        or not isinstance(v.get("file_token"), str)
+                        for v in value
+                    )
+                ):
+                    raise ValueError("附件字段无效")
                 if kind == 15 and (
                     not isinstance(value, dict)
                     or not str(value.get("link", "")).startswith("https://")
@@ -75,7 +86,15 @@ def import_plan(service, plan):
                                 "name": name,
                                 "default_view_name": "工作台",
                                 "fields": [
-                                    {"field_name": f, "type": t}
+                                    {
+                                        "field_name": f,
+                                        "type": t,
+                                        **(
+                                            {"property": target["field_properties"][f]}
+                                            if f in target.get("field_properties", {})
+                                            else {}
+                                        ),
+                                    }
                                     for f, t in target["fields"].items()
                                 ],
                             }

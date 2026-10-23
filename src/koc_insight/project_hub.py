@@ -81,6 +81,12 @@ def counts(repo, context):
 
 def sync_hub(service, context=None):
     repo = service.repo
+    if repo.meta("workspace_version") == "2":
+        if context is not None:
+            raise ValueError("精简版项目请更新活动上下文，不重放旧版总控初始化")
+        from .workspace import sync_workspace
+
+        return sync_workspace(service)
     configure = context is not None
     if configure:
         if not isinstance(context, dict):

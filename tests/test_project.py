@@ -199,3 +199,59 @@ def test_legacy_auto_brand_alias_does_not_duplicate_notes(system):
     assert c.business_key("a" * 24, AUTO_BRAND) == c.business_key(
         "a" * 24, "授权验证（品牌待确认）"
     )
+
+
+def test_contract_pass_needs_explicit_evidence_and_reconciles_unique_source(system):
+    from koc_insight.workspace import workspace_metrics
+
+    nid = "f" * 24
+    with system.repo.transaction() as db:
+        db.execute(
+            "INSERT INTO notes(note_id,url,first_submitted,published_month,detail) VALUES(?,?,?,?,?)",
+            (
+                nid,
+                "https://example.invalid",
+                "now",
+                "2026-10",
+                json.dumps({"source": "xhs-downloader", "author_id": "a" * 24}),
+            ),
+        )
+    rows = [{"fields": {"Note ID": nid, "合同验收": "通过", "审核依据": ""}}]
+    m = workspace_metrics(system.repo, rows, "2026-10")
+    assert (
+        m["collected"],
+        m["accepted"],
+        m["pending"],
+        m["missing_approval_evidence"],
+    ) == (1, 0, 1, 1)
+    rows[0]["fields"]["审核依据"] = "负责人核对SKU、原创和披露后确认"
+    assert workspace_metrics(system.repo, rows, "2026-10")["accepted"] == 1
+    with pytest.raises(Exception, match="WORKSPACE_DUPLICATE_NOTE_ID"):
+        workspace_metrics(system.repo, rows * 2, "2026-10")
+    with pytest.raises(Exception, match="WORKSPACE_MISSING_COLLECTED_NOTES"):
+        workspace_metrics(system.repo, [], "2026-10")
+
+
+def test_workspace_uses_one_key_across_brand_associations(system):
+    from koc_insight.feishu import Feishu
+
+    system.repo.set_meta("workspace_version", "2")
+    c = Feishu(system.repo)
+    assert c.business_key("a" * 24, "A") == c.business_key("a" * 24, "B")
+
+
+def test_native_plan_checks_enum_dates_and_attachments():
+    plan = sample_plan()
+    t = plan["tables"][0]
+    t["fields"].update({"状态": 3, "截止": 5, "附件": 17})
+    t["records"][0].update(
+        {
+            "状态": "待审核",
+            "截止": 1792700000000,
+            "附件": [{"file_token": "test-only-token"}],
+        }
+    )
+    validate_plan(plan)
+    t["records"][0]["附件"] = [{"url": "bad"}]
+    with pytest.raises(ValueError):
+        validate_plan(plan)

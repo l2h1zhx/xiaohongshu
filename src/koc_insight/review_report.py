@@ -1,5 +1,6 @@
 """先看交付结论，再看明细和待办；技术底稿默认隐藏。"""
 
+import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,7 @@ from .presentation import month_views
 from .report import LABELS, _build_audit_report, display_time, text
 from .urls import validate_url
 
-REPORT_VERSION = "review-v2"
+REPORT_VERSION = "review-v3-contract"
 BLUE = "174E63"
 TEAL = "D9EDEA"
 AMBER = "FFF0CD"
@@ -120,6 +121,13 @@ def build_review_report(repo, month, output, brand=None):
     unique = {r["note_id"]: r for r in rows}
     complete = sum(bool(r["monthly"]) for r in unique.values())
     pending = sum(r["review"] != "通过" for r in unique.values())
+    contract = json.loads(repo.meta("contract_reviews:" + month, "{}"))
+    if repo.meta("workspace_version") == "2":
+        pending = sum(
+            not contract.get(nid, {}).get("accepted")
+            and contract.get(nid, {}).get("status") != "不计入"
+            for nid in unique
+        )
     unresolved = sum(r["brand"] == "待确认" for r in unique.values())
     unknown = repo.rows(
         "SELECT DISTINCT s.note_id,s.brand,s.url,s.error FROM submissions s LEFT JOIN notes n ON n.note_id=s.note_id WHERE n.published_month IS NULL"
@@ -421,6 +429,29 @@ def build_review_report(repo, month, output, brand=None):
         ],
     ]:
         append(notes, values)
+    if repo.meta("workspace_version") == "2":
+        accepted = sum(bool(contract.get(nid, {}).get("accepted")) for nid in unique)
+        append(
+            overview,
+            ["合同有效笔记", accepted, "唯一Note ID；仅明确通过且有审核依据的记录计数"],
+        )
+        append(
+            overview,
+            [
+                "待合同审核",
+                pending,
+                "与飞书笔记与验收使用同一审核状态；采集成功不等于合同通过",
+            ],
+        )
+        for sheet in (detail, content):
+            last = sheet.max_column
+            sheet.insert_cols(last, 2)
+            sheet.cell(1, last, "合同验收")
+            sheet.cell(1, last + 1, "合同审核依据")
+            for i, item in enumerate(rows, 2):
+                review = contract.get(item["note_id"], {})
+                sheet.cell(i, last, text(review.get("status", "待审核")))
+                sheet.cell(i, last + 1, text(review.get("evidence", "")))
     for sheet in book:
         if sheet != audit:
             format_sheet(sheet)
