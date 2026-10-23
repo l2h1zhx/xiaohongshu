@@ -42,7 +42,9 @@ job上限55分钟，采集循环45分钟，每轮最多200项，未完下轮继�
 
 ## 云端与回退
 
-忽略的.env保存非秘密路由：KOC_REMOTE_STATE、KOC_GITHUB_REPO、KOC_STATE_KEY_FILE、KOC_UPSTREAM_ROOT。密钥在/workspace/private，不提交Git。
+忽略的.env保存非秘密路由：KOC_REMOTE_STATE、KOC_GITHUB_REPO、KOC_STATE_KEY_FILE、KOC_UPSTREAM_ROOT、FEISHU_APP_SECRET_FILE。密钥在/workspace/private，不提交Git。
+
+飞书支持通过 FEISHU_APP_SECRET_FILE 读取私有凭证文件；显式设置该路径后优先使用文件，文件不存在、不可读或内容为空时直接报错，不退回其他凭证。当前云工作区已配置私有文件并通过真实飞书验证（53个字段）；这不代表 GitHub Actions Secrets 已配置。GitHub 的 KOC_STATE_KEY 必须填写密钥文件里的单行内容，不能填写云工作区文件路径。
 安装用uv sync --frozen和bash scripts/install_xhs.sh；运行用uv run --frozen koc run-once。
 安装器支持KOC_UPSTREAM_ROOT，GitHub运行器不需要/workspace或管理员权限。
 恢复时若远程状态缺失会报错，不创建空库冒充成功。关闭启用变量可停止后续job。

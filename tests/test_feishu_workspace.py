@@ -5,6 +5,25 @@ from koc_insight.domain import SourceError
 from koc_insight.feishu import FIELD_TYPES, Feishu
 
 
+def test_private_secret_file_takes_precedence(system, monkeypatch, tmp_path):
+    secret = tmp_path / "credential"
+    secret.write_text("private-test-value\n")
+    monkeypatch.setenv("FEISHU_APP_SECRET", "injected-test-value")
+    monkeypatch.setenv("FEISHU_APP_SECRET_FILE", str(secret))
+    assert Feishu(system.repo).secret == "private-test-value"
+
+
+@pytest.mark.parametrize("contents", [None, "", "\n"])
+def test_invalid_secret_file_fails_closed(system, monkeypatch, tmp_path, contents):
+    secret = tmp_path / "credential"
+    if contents is not None:
+        secret.write_text(contents)
+    monkeypatch.setenv("FEISHU_APP_SECRET", "injected-test-value")
+    monkeypatch.setenv("FEISHU_APP_SECRET_FILE", str(secret))
+    with pytest.raises(SourceError):
+        Feishu(system.repo)
+
+
 def routes(respx_mock):
     root = "https://open.feishu.cn/open-apis"
     respx_mock.post(root + "/auth/v3/tenant_access_token/internal").respond(

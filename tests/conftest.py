@@ -6,6 +6,7 @@ from koc_insight.service import Service
 
 @pytest.fixture(autouse=True)
 def isolate_runtime_environment(monkeypatch):
+    monkeypatch.delenv("FEISHU_APP_SECRET_FILE", raising=False)
     monkeypatch.setenv("KOC_REMOTE_STATE", "local")
     monkeypatch.delenv("KOC_STATE_KEY", raising=False)
     monkeypatch.delenv("KOC_STATE_KEY_FILE", raising=False)

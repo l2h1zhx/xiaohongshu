@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import time
+from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -78,6 +79,14 @@ class Feishu:
         self.token, self.expires = "", 0
         self.app_id = os.getenv("FEISHU_APP_ID", "") or repo.meta("feishu_owner_appid")
         self.secret = os.getenv("FEISHU_APP_SECRET", "")
+        secret_file = os.getenv("FEISHU_APP_SECRET_FILE", "")
+        if secret_file:
+            try:
+                self.secret = Path(secret_file).read_text().strip()
+            except (OSError, UnicodeError):
+                raise SourceError("FEISHU_SECRET_FILE_UNREADABLE") from None
+            if not self.secret:
+                raise SourceError("FEISHU_CONFIG_MISSING")
         owner = repo.meta("feishu_owner_appid")
         saved = not owner or owner == self.app_id
         self.app = os.getenv("FEISHU_BITABLE_APP_TOKEN", "") or (
