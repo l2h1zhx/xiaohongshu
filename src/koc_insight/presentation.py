@@ -67,6 +67,21 @@ def note_view(repo, nid, association, month=None):
         "SELECT data FROM annotations WHERE note_id=? ORDER BY id DESC LIMIT 1", (nid,)
     )
     brand, brand_state = identity(repo, nid, association)
+    brand_finding = finding(repo, nid)
+    evidence = brand_finding.get("evidence", "")
+    if brand == "待确认":
+        evidence = "正文/话题未提供可确定归属的品牌证据；" + brand_finding.get(
+            "image_status", "图片待检查"
+        )
+    elif brand_finding.get("method", "").startswith("图片OCR"):
+        evidence = (
+            "图片文字："
+            + "；".join(
+                line
+                for line in evidence.splitlines()
+                if brand.casefold() in line.casefold()
+            )[:500]
+        )
     monthly_state = (
         monthly["quality"]
         if monthly
@@ -94,7 +109,7 @@ def note_view(repo, nid, association, month=None):
         "association": association,
         "brand": brand,
         "brand_status": brand_state,
-        "brand_evidence": finding(repo, nid).get("evidence", ""),
+        "brand_evidence": evidence,
         "url": row["url"],
         "detail": current,
         "published_at": row["published_at"],

@@ -51,15 +51,16 @@ def identity(repo, nid, submitted):
     return item.get("brand") or "待确认", item.get("status") or "待识别"
 
 
-def candidates(content, known=()):
+def candidates(content, known=(), allow_unlisted_latin=True):
     matches = set()
     for name in known:
-        if name and name.casefold() in content.casefold():
+        pattern = r"(?<![A-Za-z0-9])" + re.escape(name) + r"(?![A-Za-z0-9])"
+        if name and re.search(pattern, content, re.IGNORECASE):
             matches.add(name)
     for name in re.findall(
         r"(?<![A-Za-z0-9-])[A-Z][A-Z0-9]{2,15}(?![A-Za-z0-9-])", content
     ):
-        if name not in IGNORE and content.count(name) >= 2:
+        if allow_unlisted_latin and name not in IGNORE and content.count(name) >= 2:
             matches.add(name)
     matches.update(
         re.findall(
@@ -101,7 +102,7 @@ def record(service, nid, brand, status, evidence, method, image_status="未检�
 def identify_text(service, detail):
     previous = finding(service.repo, detail.note_id)
     if previous.get("method") in ("人工指定", "智能体识别") or (
-        previous.get("method") == "图片OCR" and previous.get("brand")
+        previous.get("method", "").startswith("图片OCR") and previous.get("brand")
     ):
         return previous
     content = "\n".join(
@@ -113,7 +114,7 @@ def identify_text(service, detail):
         if r["brand"] not in AUTO_LABELS
     ]
     names = candidates(content, known)
-    if previous.get("method") == "图片OCR" and not names:
+    if previous.get("method", "").startswith("图片OCR") and not names:
         return previous
     brand = names[0] if len(names) == 1 else ""
     status = "自动识别" if brand else "多品牌待确认" if names else "待确认"
@@ -214,10 +215,23 @@ def identify_pending(service, reader=None, limit=10, retry_images=False):
             break
         detail = Detail(**json.loads(row["detail"]))
         item = identify_text(service, detail)
+        # 工作区出口不可达时交给既定的 GitHub 运行器补一次；不无限重试来源拒绝。
+        cross_runtime_retry = (
+            os.getenv("GITHUB_ACTIONS") == "true"
+            and item.get("method") in ("图片OCR", "图片OCR（云工作区）")
+            and any(
+                code in item.get("image_status", "")
+                for code in ("IMAGE_NETWORK_ERROR", "DNS_ERROR")
+            )
+        )
         if (
             item.get("brand")
             or item.get("status") == "多品牌待确认"
-            or (item.get("image_status") != "未检查" and not retry_images)
+            or (
+                item.get("image_status") != "未检查"
+                and not retry_images
+                and not cross_runtime_retry
+            )
         ):
             continue
         checked += 1
@@ -243,7 +257,18 @@ def identify_pending(service, reader=None, limit=10, retry_images=False):
                     else "IMAGE_NETWORK_ERROR"
                 )
         combined = "\n".join(content)
-        names = candidates(combined)
+        known = [
+            r["brand"]
+            for r in service.repo.rows(
+                "SELECT DISTINCT brand FROM brand_findings WHERE brand!='' AND method IN ('正文与话题','智能体识别','人工指定')"
+            )
+        ]
+        known += [
+            r["brand"]
+            for r in service.repo.rows("SELECT DISTINCT brand FROM submissions")
+            if r["brand"] not in AUTO_LABELS
+        ]
+        names = candidates(combined, known, allow_unlisted_latin=False)
         # OCR 是识别建议，不将同图多个产品强行归为一个品牌。
         brand = names[0] if len(names) == 1 else ""
         status = "自动识别" if brand else "多品牌待确认" if names else "待确认"
@@ -256,7 +281,9 @@ def identify_pending(service, reader=None, limit=10, retry_images=False):
             brand,
             status,
             combined or item.get("evidence", ""),
-            "图片OCR",
+            "图片OCR（GitHub）"
+            if os.getenv("GITHUB_ACTIONS") == "true"
+            else "图片OCR（云工作区）",
             image_status,
         )
     return {"checked": checked}

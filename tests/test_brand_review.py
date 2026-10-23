@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 from openpyxl import load_workbook
 from test_core import INITIAL, NID, PUBLISHED, URL, ready
@@ -88,6 +89,27 @@ def test_ocr_failure_keeps_metrics_and_records_actionable_gap(system):
     )
 
 
+def test_workspace_network_failure_gets_only_one_github_retry(system, monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    capture(system, "体验分享", images=["https://sns.xhscdn.com/one"])
+
+    class Reader:
+        calls = 0
+
+        def read(self, url):
+            self.calls += 1
+            raise httpx.ConnectError("test network unavailable")
+
+    reader = Reader()
+    identify_pending(system, reader)
+    assert reader.calls == 1
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    identify_pending(system, reader)
+    identify_pending(system, reader)
+    assert reader.calls == 2
+    assert finding(system.repo, NID)["method"] == "图片OCR（GitHub）"
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -105,6 +127,18 @@ def test_image_url_guard_rejects_untrusted_destinations(url):
 def test_image_http_is_upgraded_before_fetch(monkeypatch):
     monkeypatch.setattr("koc_insight.brands.public_dns", lambda host, **kwargs: None)
     assert validate_image_url("http://sns.xhscdn.com/a") == "https://sns.xhscdn.com/a"
+
+
+def test_ocr_noise_is_not_promoted_to_a_new_brand(system):
+    capture(system, "干皮护理分享", images=["https://sns.xhscdn.com/one"])
+
+    class Reader:
+        def read(self, url):
+            return "AAA\nAAA\nAAA\nAHA\nAHA\nSPF\nSPF"
+
+    identify_pending(system, Reader())
+    assert finding(system.repo, NID)["brand"] == ""
+    assert finding(system.repo, NID)["status"] == "待确认"
 
 
 def test_report_separates_current_from_monthly_and_has_clear_review(system, tmp_path):
