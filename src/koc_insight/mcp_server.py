@@ -59,6 +59,23 @@ def create_server(db_path):
             return classify(s, note_id, brand, evidence)
 
     @mcp.tool()
+    def get_project_context() -> dict:
+        """读取统一项目上下文、来源和整合状态；来源计划不等于已执行，不能据此自动发送消息或支出。"""
+        from .project_hub import counts, get_context
+
+        with session() as s:
+            context = get_context(s.repo)
+            return {"context": context, "actual_counts": counts(s.repo, context)}
+
+    @mcp.tool()
+    def get_project_workspace(table_name: str) -> dict:
+        """读取活动项目飞书实时任务/KOC/账号等工作表；先读最新状态再更新或派工。"""
+        from .project_hub import read_workspace
+
+        with session() as s:
+            return read_workspace(s, table_name)
+
+    @mcp.tool()
     def get_status() -> dict:
         """查看任务、失败和同步积压数量，不返回密钥。"""
         with session() as s:

@@ -40,6 +40,13 @@ def main():
     ingest.add_argument("--text")
     ingest.add_argument("--file", type=Path)
     ingest.add_argument("--requirements", default="")
+    project = commands.add_parser("project-hub")
+    project.add_argument("--context-file", type=Path, required=True)
+    migration = commands.add_parser("project-import")
+    migration.add_argument("--plan-file", type=Path, required=True)
+    source = commands.add_parser("source-inspect")
+    source.add_argument("--file", type=Path, required=True)
+    source.add_argument("--output", type=Path, required=True)
     commands.add_parser("status")
     commands.add_parser("issues")
     inspect = commands.add_parser("inspect")
@@ -98,6 +105,24 @@ def main():
     demo = commands.add_parser("demo")
     demo.add_argument("--output", type=Path, default=Path("var/demo-report.xlsx"))
     args = parser.parse_args()
+    if args.command == "source-inspect":
+        from .project_sources import inspect_workbook
+
+        result = inspect_workbook(args.file)
+        descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            json.dump(result, output, ensure_ascii=False, indent=2)
+        print(
+            json.dumps(
+                {
+                    "sheets": len(result["sheets"]),
+                    "unique_xhs_urls": len(result["xhs_link_occurrences"]),
+                    "output": str(args.output),
+                    "imported": False,
+                }
+            )
+        )
+        return
     if args.command == "state-keygen":
         generate_key(args.output)
         print(json.dumps({"key_file": str(args.output), "key_value_printed": False}))
@@ -128,7 +153,15 @@ def main():
     context = service_context(args.db, local=args.command == "demo")
     service = context.__enter__()
     try:
-        if args.command == "ingest":
+        if args.command == "project-import":
+            from .project_import import import_plan
+
+            result = import_plan(service, json.loads(args.plan_file.read_text()))
+        elif args.command == "project-hub":
+            from .project_hub import sync_hub
+
+            result = sync_hub(service, json.loads(args.context_file.read_text()))
+        elif args.command == "ingest":
             content = args.text
             if args.file:
                 from .intake import read_links

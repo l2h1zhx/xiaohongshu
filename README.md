@@ -23,6 +23,7 @@ uv run --frozen koc run-once
 uv run --frozen koc report --month 2026-10 --output var/reports/品牌A-10月.xlsx
 ```
 
+- [统一项目与来源迁移](docs/project.md)
 - [完整使用说明](docs/system.md)
 - [无人值守与加密状态](docs/automation.md)
 - [流程与职责](docs/flow.md)
@@ -31,5 +32,5 @@ uv run --frozen koc report --month 2026-10 --output var/reports/品牌A-10月.xl
 - [实施阶段](IMPLEMENTATION_PLAN.md)
 
 3条用户授权笔记已通过XHS-Downloader实际详情接口连续两轮全部读取成功，未下载媒体；PoC脚本见 scripts/poc_xhs_real.py。后续已完成独立运行器验证并启用定时流程。
-飞书应用凭证已绑定，台账已完成真实笔记同步和读回；新版“笔记管理”提供笔记总览、24小时表现、月结交付、内容审核和后台底稿视图。原始表保留。准备与复用步骤见 [飞书准备](docs/feishu-setup.md)。未开启收费资源。
+飞书应用凭证已绑定，台账已完成真实笔记同步和读回；新版“笔记管理”提供笔记总览、24小时表现、月结交付、内容审核和后台底稿视图。已清理经核对不再使用的旧表。准备与复用步骤见 [飞书准备](docs/feishu-setup.md)。未开启收费资源。
 第三方项目未嵌入本仓库：XHS-Downloader (GPL-3.0)，飞书官方MCP (MIT)，版本证据见可行性文档。

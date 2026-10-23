@@ -284,7 +284,7 @@ class Feishu:
                 path,
                 params={"page_size": 100, **({"page_token": token} if token else {})},
             )
-            yield from data.get("items", [])
+            yield from data.get("items") or []
             if not data.get("has_more"):
                 break
             token = data.get("page_token")
