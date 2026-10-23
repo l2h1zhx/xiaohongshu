@@ -83,3 +83,30 @@ def test_tick_partial_report_includes_blocked_tasks(system, tmp_path, monkeypatc
     )
     assert result["reports"] and not result["reports"][0]["complete"]
     assert result["attention_required"]
+
+
+def test_completed_month_report_revisions_follow_review_changes(
+    system, tmp_path, monkeypatch
+):
+    c = ready(system)
+
+    class Sync:
+        def __init__(self, *args):
+            pass
+
+        def sync(self, **kwargs):
+            return {"synced": 0}
+
+    monkeypatch.setattr("koc_insight.runtime.Feishu", Sync)
+    options = dict(
+        collector=c,
+        now=datetime(2026, 11, 1, 9, tzinfo=SH),
+        min_interval=0,
+        report_dir=tmp_path / "reports",
+    )
+    first = tick(system, **options)["reports"]
+    review(system, NID, "需修改", "请核对品牌露出")
+    second = tick(system, **options)["reports"]
+    assert first and second
+    assert first[0]["path"] != second[0]["path"]
+    assert len(list((tmp_path / "reports").glob("*.xlsx"))) == 2

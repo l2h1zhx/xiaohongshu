@@ -47,8 +47,8 @@ def extract_urls(text: str) -> list[str]:
     return re.findall(r'https?://[^\s<>"\[\]（）()，。；！？、]+', text)
 
 
-def public_dns(host: str):
-    if host not in HOSTS:
+def public_dns(host: str, allowed_hosts=None):
+    if host not in (HOSTS if allowed_hosts is None else allowed_hosts):
         raise SourceError("SSRF_BLOCKED")
     # 平台HTTPS代理负责目标DNS；此模式下本机可能无法解析外网域名。
     # 仍逐跳限制为固定可信域名，保留平台出口策略与TLS校验，不改代理配置。

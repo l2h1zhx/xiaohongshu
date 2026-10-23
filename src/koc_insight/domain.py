@@ -59,6 +59,7 @@ class Detail:
     source_version: str = "unverified"
     evidence: str | None = None
     image_count: int | None = None
+    image_urls: list[str] = field(default_factory=list)
 
     def validate(self):
         if not re.fullmatch(r"[0-9a-f]{24}", self.note_id):
@@ -69,6 +70,10 @@ class Detail:
             type(self.image_count) is not int or self.image_count < 0
         ):
             raise ValueError("INVALID_IMAGE_COUNT")
+        if not isinstance(self.image_urls, list) or len(self.image_urls) > 30:
+            raise ValueError("INVALID_IMAGE_URLS")
+        if any(not isinstance(url, str) or len(url) > 4096 for url in self.image_urls):
+            raise ValueError("INVALID_IMAGE_URLS")
         for metric in METRICS:
             count = self.counts.get(metric)
             if count is not None and (type(count) is not int or count < 0):

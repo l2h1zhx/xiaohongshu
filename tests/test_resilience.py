@@ -1,4 +1,3 @@
-import json
 from datetime import timedelta
 
 from test_core import INITIAL, NID, PUBLISHED, URL, ready
@@ -6,7 +5,7 @@ from test_core import INITIAL, NID, PUBLISHED, URL, ready
 from koc_insight.collector import parse_upstream
 
 
-def test_image_count_is_metadata_without_retaining_media_urls():
+def test_image_urls_retained_for_authorized_brand_ocr():
     detail = parse_upstream(
         {
             "data": {
@@ -17,7 +16,7 @@ def test_image_count_is_metadata_without_retaining_media_urls():
         }
     )
     assert detail.image_count == 2
-    assert "media.invalid" not in json.dumps(detail.dict())
+    assert len(detail.image_urls) == 2
 
 
 def test_expired_leases_are_bounded(system):

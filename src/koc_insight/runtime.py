@@ -148,6 +148,9 @@ def tick(
     finally:
         if owns:
             collector.close()
+    from .brands import identify_pending
+
+    brands = identify_pending(service, limit=min(10, limit))
     sync = Feishu(service.repo).sync(limit=min(500, max(100, limit)))
     reports = []
     root = Path(
@@ -165,8 +168,17 @@ def tick(
             "SELECT id,status,error,attempts,selected_snapshot FROM jobs WHERE phase='MONTHLY' AND phase_key=? ORDER BY id",
             (month,),
         )
+        from .presentation import month_views
+        from .review_report import REPORT_VERSION
+
         version = hashlib.sha256(
-            json.dumps(tasks, sort_keys=True).encode()
+            (
+                REPORT_VERSION
+                + json.dumps(
+                    {"tasks": tasks, "review": month_views(service.repo, month)},
+                    sort_keys=True,
+                )
+            ).encode()
         ).hexdigest()[:16]
         key = "report_version:" + month
         if service.repo.meta(key) != str(version):
@@ -181,9 +193,16 @@ def tick(
                 report["unfinished_tasks"] = sum(
                     t["status"] != "SUCCEEDED" for t in tasks
                 )
+            if service.repo.meta("feishu_report_table_id"):
+                from .report_delivery import publish_report
+
+                publication = publish_report(service, path, month)
+                if reports and reports[-1].get("month") == month:
+                    reports[-1]["publication"] = publication
             service.repo.set_meta(key, str(version))
     return {
         "processed": processed,
+        "brand_identification": brands,
         "sync": sync,
         "reports": reports,
         "status": service.status(),

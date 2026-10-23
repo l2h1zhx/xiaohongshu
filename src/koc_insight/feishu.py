@@ -64,10 +64,39 @@ EXTENDED_FIELDS = {
     "AI复用建议": 1,
 }
 FIELD_TYPES.update(EXTENDED_FIELDS)
+REVIEW_FIELDS = {
+    **dict.fromkeys(
+        ("品牌状态", "品牌识别依据", "审核结论", "审核备注", "数据口径", "关注事项"), 1
+    ),
+    **dict.fromkeys(tuple(METRIC_NAMES.values()) + ("完整互动量",), 2),
+}
+EXTENDED_FIELDS.update(REVIEW_FIELDS)
+FIELD_TYPES.update(REVIEW_FIELDS)
+MAIN_FIELDS = [
+    "品牌",
+    "品牌状态",
+    "作者昵称",
+    "标题",
+    "类型",
+    "发布时间",
+    "审核结论",
+    "数据口径",
+    *METRIC_NAMES.values(),
+    "完整互动量",
+    "关注事项",
+    "原笔记链接",
+]
 
 
-def schema():
-    return [{"field_name": name, "type": kind} for name, kind in FIELD_TYPES.items()]
+def schema(review=False):
+    names = list(FIELD_TYPES)
+    if review:
+        names = (
+            MAIN_FIELDS[:-1]
+            + [name for name in names if name not in MAIN_FIELDS]
+            + ["原笔记链接"]
+        )
+    return [{"field_name": name, "type": FIELD_TYPES[name]} for name in names]
 
 
 class Feishu:
@@ -95,6 +124,16 @@ class Feishu:
         self.table = os.getenv("FEISHU_TABLE_NOTES_ID", "") or (
             repo.meta("feishu_table_id") if saved else ""
         )
+        if saved and repo.meta("feishu_review_table_id"):
+            self.table = repo.meta("feishu_review_table_id")
+
+    def business_key(self, nid, brand):
+        prefix = (
+            self.table + "\0"
+            if self.repo.meta("feishu_review_table_id") == self.table
+            else ""
+        )
+        return hashlib.sha256((prefix + brand + "\0" + nid).encode()).hexdigest()
 
     def auth(self):
         if not all((self.app_id, self.secret)):
@@ -286,9 +325,11 @@ class Feishu:
         return result
 
     def fields(self, nid, brand):
+        from .presentation import note_view
+
         note = self.repo.rows("SELECT * FROM notes WHERE note_id=?", (nid,))[0]
         detail = json.loads(note["detail"])
-        business_key = hashlib.sha256((brand + "\0" + nid).encode()).hexdigest()
+        business_key = self.business_key(nid, brand)
         fields = {k: "" for k in TEXT_FIELDS}
         fields.update({k: None for k in DATE_FIELDS + NUMBER_FIELDS})
         fields.update(
@@ -378,7 +419,122 @@ class Feishu:
                 ("AI复用建议", "reuse_advice"),
             ):
                 fields[name] = values.get(key, "")
+        view = note_view(self.repo, nid, brand)
+        fields.update(
+            {
+                "品牌": view["brand"],
+                "品牌状态": view["brand_status"],
+                "品牌识别依据": view["brand_evidence"][:6000],
+                "数据口径": view["basis"],
+                "关注事项": "；".join(view["issues"]),
+                "完整互动量": view["total"],
+                "24H状态": view["observed_status"],
+                "结案状态": view["monthly_status"],
+                **{METRIC_NAMES[k]: view["counts"].get(k) for k in METRICS},
+            }
+        )
+        # 没有智能体记录的人工结论时，不清空用户在飞书填写的审核字段。
+        if self.repo.rows("SELECT 1 FROM reviews WHERE note_id=? LIMIT 1", (nid,)):
+            fields.update({"审核结论": view["review"], "审核备注": view["remarks"]})
         return fields
+
+    def configure_review_views(self):
+        definitions = {
+            "笔记总览": MAIN_FIELDS,
+            "24小时表现": ["品牌", "作者昵称", "标题", "发布时间", "24H状态"]
+            + ["24H" + METRIC_NAMES[k] for k in METRICS]
+            + ["AI选题", "AI复用建议", "原笔记链接"],
+            "月结交付": ["品牌", "品牌状态", "作者昵称", "标题", "审核结论", "结案状态"]
+            + ["结案" + METRIC_NAMES[k] for k in METRICS]
+            + ["关注事项", "原笔记链接"],
+            "内容审核": [
+                "品牌",
+                "品牌状态",
+                "作者昵称",
+                "标题",
+                "正文",
+                "话题",
+                "发布时间",
+                "AI选题",
+                "AI核心卖点",
+                "AI复用建议",
+                "品牌识别依据",
+                "审核结论",
+                "审核备注",
+                "原笔记链接",
+            ],
+            "后台采集底稿": list(FIELD_TYPES),
+        }
+        field_ids = {
+            f["field_name"]: f["field_id"] for f in self.pages(self.base + "/fields")
+        }
+        views = {v["view_name"]: v["view_id"] for v in self.pages(self.base + "/views")}
+        for name, visible in definitions.items():
+            if name not in views:
+                created = self.request(
+                    "POST",
+                    self.base + "/views",
+                    json={"view_name": name, "view_type": "grid"},
+                )
+                views[name] = created["view"]["view_id"]
+            hidden = [fid for label, fid in field_ids.items() if label not in visible]
+            self.request(
+                "PATCH",
+                self.base + "/views/" + views[name],
+                json={"property": {"hidden_fields": hidden}},
+            )
+        self.repo.set_meta("feishu_review_default_view", views["笔记总览"])
+        return {
+            "views": list(definitions),
+            "table_id": self.table,
+            "view_id": views["笔记总览"],
+        }
+
+    def upgrade_review_layout(self):
+        """创建业务字段顺序清晰的新表，保留原表和所有已有数据，不删除字段。"""
+        old = self.table
+        if not self.repo.meta("feishu_review_table_id"):
+            tables_path = (
+                f"/open-apis/bitable/v1/apps/{quote(self.app, safe='')}/tables"
+            )
+            matches = [
+                t for t in self.pages(tables_path) if t.get("name") == "笔记管理"
+            ]
+            if matches and not self.repo.meta("feishu_review_create_state"):
+                raise SourceError("FEISHU_REVIEW_TABLE_NAME_CONFLICT")
+            if not matches:
+                if self.repo.meta("feishu_review_create_state") == "UNCERTAIN":
+                    raise SourceError("FEISHU_REVIEW_CREATE_UNCERTAIN")
+                self.repo.set_meta("feishu_review_create_state", "CREATING")
+                if hasattr(self, "checkpoint"):
+                    self.checkpoint()
+                try:
+                    created = self.request(
+                        "POST",
+                        tables_path,
+                        json={
+                            "table": {
+                                "name": "笔记管理",
+                                "default_view_name": "笔记总览",
+                                "fields": schema(review=True),
+                            }
+                        },
+                    )
+                except SourceError:
+                    self.repo.set_meta("feishu_review_create_state", "UNCERTAIN")
+                    raise
+                self.table = created["table_id"]
+            elif len(matches) == 1:
+                self.table = matches[0]["table_id"]
+            else:
+                raise SourceError("FEISHU_REVIEW_TABLE_NAME_CONFLICT")
+            self.repo.set_meta("feishu_archive_table_id", old)
+            self.repo.set_meta("feishu_review_table_id", self.table)
+            self.repo.set_meta("feishu_review_create_state", "DONE")
+            self.repo.db.execute("""INSERT INTO outbox(snapshot_id,note_id,brand)
+                SELECT MAX(p.id),p.note_id,s.brand FROM snapshots p JOIN submissions s ON s.note_id=p.note_id GROUP BY p.note_id,s.brand
+                ON CONFLICT(snapshot_id,brand) DO UPDATE SET status='PENDING',next_retry=0""")
+        return self.configure_review_views()
 
     def sync(self, limit=100):
         if not 1 <= limit <= 500:
@@ -441,6 +597,7 @@ class Feishu:
                             json={"fields": fields},
                         )
                     else:
+                        fields.setdefault("审核结论", "待审核")
                         # 飞书 client_token 要求 UUID4；持久保存后重放沿用同一值。
                         token_key = "feishu_client_token:" + key
                         with self.repo.transaction():

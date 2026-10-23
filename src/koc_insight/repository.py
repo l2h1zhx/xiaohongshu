@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS reviews(
  decision TEXT NOT NULL, remarks TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS due_jobs ON jobs(status,due,next_retry);
+CREATE TABLE IF NOT EXISTS brand_findings(
+ id INTEGER PRIMARY KEY, note_id TEXT NOT NULL REFERENCES notes(note_id),
+ brand TEXT NOT NULL, status TEXT NOT NULL, evidence TEXT NOT NULL,
+ method TEXT NOT NULL, image_status TEXT NOT NULL DEFAULT '未检查',
+ created_at TEXT NOT NULL
+);
 """
 
 
