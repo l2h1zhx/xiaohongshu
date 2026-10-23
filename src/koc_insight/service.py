@@ -14,9 +14,11 @@ class Service:
 
     def ingest(self, text, brand="", requirements="", now=None):
         now = utc(now or datetime.now(UTC))
-        from .brands import AUTO_BRAND
+        from .brands import AUTO_BRAND, AUTO_LABELS
 
         brand = brand.strip() or AUTO_BRAND
+        if brand in AUTO_LABELS:
+            brand = AUTO_BRAND
         result = {"accepted": 0, "duplicate": 0, "invalid": 0}
         urls = extract_urls(text)
         if not urls:

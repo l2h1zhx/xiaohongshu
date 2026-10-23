@@ -176,3 +176,26 @@ def test_feishu_pagination_accepts_empty_null_items(system, monkeypatch):
         client, "request", lambda *a, **k: {"items": None, "has_more": False}
     )
     assert list(client.pages("/empty")) == []
+
+
+def test_legacy_auto_brand_alias_does_not_duplicate_notes(system):
+    from koc_insight.brands import AUTO_BRAND
+    from koc_insight.feishu import Feishu
+    from koc_insight.presentation import month_views
+
+    url = "https://www.xiaohongshu.com/explore/" + "a" * 24
+    system.ingest(url, "授权验证（品牌待确认）")
+    assert system.ingest(url)["duplicate"] == 1
+    with system.repo.transaction() as db:
+        db.execute(
+            "UPDATE notes SET published_month='2026-10' WHERE note_id=?", ("a" * 24,)
+        )
+        db.execute(
+            "INSERT INTO submissions(brand,url,submitted_at,note_id,status) VALUES(?,?,?,?,?)",
+            ("授权验证（品牌待确认）", url + "?old=1", "now", "a" * 24, "REGISTERED"),
+        )
+    assert len(month_views(system.repo, "2026-10")) == 1
+    c = Feishu(system.repo)
+    assert c.business_key("a" * 24, AUTO_BRAND) == c.business_key(
+        "a" * 24, "授权验证（品牌待确认）"
+    )

@@ -141,5 +141,13 @@ def month_views(repo, month, brand=None):
         "SELECT DISTINCT n.note_id,s.brand FROM notes n JOIN submissions s ON s.note_id=n.note_id WHERE n.published_month=? ORDER BY n.published_at,n.note_id",
         (month,),
     )
-    result = [note_view(repo, row["note_id"], row["brand"], month) for row in rows]
+    from .brands import AUTO_BRAND, AUTO_LABELS
+
+    unique = {}
+    for row in rows:
+        submitted = AUTO_BRAND if row["brand"] in AUTO_LABELS else row["brand"]
+        key = (row["note_id"], submitted)
+        if key not in unique:
+            unique[key] = note_view(repo, row["note_id"], submitted, month)
+    result = list(unique.values())
     return [r for r in result if not brand or r["brand"] == brand]

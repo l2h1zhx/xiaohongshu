@@ -128,6 +128,10 @@ class Feishu:
             self.table = repo.meta("feishu_review_table_id")
 
     def business_key(self, nid, brand):
+        from .brands import AUTO_BRAND, AUTO_LABELS
+
+        if brand in AUTO_LABELS:
+            brand = AUTO_BRAND
         prefix = (
             self.table + "\0"
             if self.repo.meta("feishu_review_table_id") == self.table
