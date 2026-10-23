@@ -255,3 +255,87 @@ def test_native_plan_checks_enum_dates_and_attachments():
     t["records"][0]["附件"] = [{"url": "bad"}]
     with pytest.raises(ValueError):
         validate_plan(plan)
+
+
+def test_workspace_report_keeps_one_contract_count_and_link_last(system, tmp_path):
+    from datetime import datetime
+
+    from openpyxl import load_workbook
+
+    from koc_insight.collector import MockCollector
+    from koc_insight.domain import SH
+    from koc_insight.report import build_report
+
+    nid = "c" * 24
+    system.ingest(
+        "https://www.xiaohongshu.com/explore/" + nid,
+        now=datetime(2026, 10, 15, 11, tzinfo=SH),
+    )
+    system.run(
+        MockCollector(), now=datetime(2026, 10, 15, 11, tzinfo=SH), min_interval=0
+    )
+    system.repo.set_meta("workspace_version", "2")
+    system.repo.set_meta(
+        "contract_reviews:2026-10",
+        json.dumps(
+            {
+                nid: {
+                    "status": "待补证",
+                    "accepted": False,
+                    "evidence": "测试：待补原文证据",
+                }
+            }
+        ),
+    )
+    path = tmp_path / "review.xlsx"
+    build_report(system.repo, "2026-10", path)
+    book = load_workbook(path)
+    labels = [r[0].value for r in book["交付总览"].iter_rows(min_row=2)]
+    assert labels.count("待合同审核") == 1
+    assert labels.count("合同有效笔记") == 1
+    assert "已收录唯一笔记" in labels
+    for name in ("笔记明细", "内容与审核"):
+        sheet = book[name]
+        headers = [c.value for c in sheet[1]]
+        assert headers[-1] == "查看原笔记"
+        assert "合同验收" in headers and "人工审核结论" not in headers
+        assert sheet.cell(2, headers.index("合同验收") + 1).value == "待补证"
+    book.close()
+
+
+def test_workspace_sync_omits_duplicate_stage_columns_and_preserves_contract_fields(
+    system, monkeypatch, configured
+):
+    from datetime import datetime
+
+    from koc_insight.collector import MockCollector
+    from koc_insight.domain import SH
+    from koc_insight.feishu import Feishu
+    from koc_insight.workspace import NOTE_TYPES
+
+    nid = "d" * 24
+    system.ingest(
+        "https://www.xiaohongshu.com/explore/" + nid,
+        now=datetime(2026, 10, 15, 11, tzinfo=SH),
+    )
+    system.run(
+        MockCollector(), now=datetime(2026, 10, 15, 11, tzinfo=SH), min_interval=0
+    )
+    system.repo.set_meta("workspace_version", "2")
+    c = Feishu(system.repo)
+    fields = c.fields(nid, "__AUTO__")
+    assert (
+        "最新点赞" not in fields
+        and "录入采集时间" not in fields
+        and "结案点赞" not in fields
+    )
+    assert "合同验收" not in fields and "审核依据" not in fields
+    assert fields["归属月份"] == "2026-10"
+    monkeypatch.setattr(
+        c,
+        "pages",
+        lambda path: iter(
+            [{"field_name": k, "type": v} for k, v in NOTE_TYPES.items()]
+        ),
+    )
+    assert c.diagnostic()["required_fields"] == len(NOTE_TYPES) < 40

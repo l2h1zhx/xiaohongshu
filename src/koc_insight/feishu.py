@@ -298,13 +298,20 @@ class Feishu:
 
     def diagnostic(self):
         actual = {f["field_name"]: f["type"] for f in self.pages(self.base + "/fields")}
-        missing = [key for key, kind in FIELD_TYPES.items() if actual.get(key) != kind]
+        required = FIELD_TYPES
+        if self.repo.meta("workspace_version") == "2":
+            from .workspace import NOTE_TYPES
+
+            required = NOTE_TYPES
+        missing = [key for key, kind in required.items() if actual.get(key) != kind]
         if missing:
             raise SourceError("FEISHU_SCHEMA_MISMATCH")
-        return {"schema": "ok", "required_fields": len(FIELD_TYPES)}
+        return {"schema": "ok", "required_fields": len(required)}
 
     def upgrade_schema(self):
         """显式添加新版字段；不更改任何已有字段类型，也不删除字段。"""
+        if self.repo.meta("workspace_version") == "2":
+            return self.diagnostic()
         actual = {f["field_name"]: f["type"] for f in self.pages(self.base + "/fields")}
         if any(actual.get(k) != v for k, v in CORE_FIELD_TYPES.items()):
             raise SourceError("FEISHU_SCHEMA_MISMATCH")
@@ -444,6 +451,15 @@ class Feishu:
         acknowledged = int(self.repo.meta("feishu_review_ack:" + business_key, "0"))
         if reviews and reviews[0]["id"] > acknowledged:
             fields.update({"审核结论": view["review"], "审核备注": view["remarks"]})
+        if self.repo.meta("workspace_version") == "2":
+            from .workspace import NOTE_TYPES
+
+            fields["归属月份"] = view["month"]
+            if "审核结论" in fields:
+                fields["历史审核批注"] = view["review"] + (
+                    "：" + view["remarks"] if view["remarks"] else ""
+                )
+            fields = {k: v for k, v in fields.items() if k in NOTE_TYPES}
         return fields
 
     def configure_review_views(self):
@@ -609,7 +625,8 @@ class Feishu:
                             json={"fields": fields},
                         )
                     else:
-                        fields.setdefault("审核结论", "待审核")
+                        if self.repo.meta("workspace_version") != "2":
+                            fields.setdefault("审核结论", "待审核")
                         if self.repo.meta("workspace_version") == "2":
                             fields.setdefault("合同验收", "待审核")
                             fields.setdefault("SKU", "待确认")
@@ -630,7 +647,7 @@ class Feishu:
                         )
                         record_id = data["record"]["record_id"]
                     with self.repo.transaction() as db:
-                        if "审核结论" in fields:
+                        if "审核结论" in fields or "历史审核批注" in fields:
                             review = db.execute(
                                 "SELECT id FROM reviews WHERE note_id=? ORDER BY id DESC LIMIT 1",
                                 (event["note_id"],),
