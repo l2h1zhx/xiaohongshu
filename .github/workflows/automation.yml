@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   collect:
-    if: github.event_name == 'workflow_dispatch' || vars.KOC_AUTOMATION_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' || vars.KOC_AUTOMATION_ENABLED != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
@@ -43,4 +43,18 @@ jobs:
       - run: uv sync --frozen --no-dev
       - run: bash scripts/install_xhs.sh
       - name: Execute due jobs and persist encrypted state
-        run: uv run --frozen --no-dev koc run-once
+        run: |
+          python - <<'PY'
+          import json,re,subprocess,sys
+          result=subprocess.run(['uv','run','--frozen','--no-dev','koc','run-once'],stderr=subprocess.PIPE,text=True)
+          if result.returncode:
+              codes=[]
+              for line in result.stderr.splitlines():
+                  try:
+                      code=json.loads(line).get('error','')
+                  except (ValueError,AttributeError):
+                      continue
+                  if isinstance(code,str) and re.fullmatch(r'[A-Z][A-Z0-9_]{0,100}',code): codes.append(code)
+              print('::error::KOC runtime failed: '+(', '.join(codes) or 'UNCLASSIFIED_RUNTIME_FAILURE'))
+          sys.exit(result.returncode)
+          PY
