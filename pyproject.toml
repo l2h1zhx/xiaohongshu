@@ -1,0 +1,26 @@
+[project]
+name = "koc-insight"
+version = "0.1.0"
+description = "个人 KOC 笔记登记、24 小时观察与月度交付助手"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.28,<1", "openpyxl>=3.1,<4", "mcp>=1.12,<2", "cryptography>=45,<51", "python-dotenv>=1,<2"]
+
+[project.scripts]
+koc = "koc_insight.cli:entrypoint"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "respx>=0.22,<1", "ruff>=0.11,<1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "koc_insight": {
+      "command": "/workspace/xiaohongshu/.venv/bin/koc",
+      "args": ["mcp"]
+    }
+  }
+}
