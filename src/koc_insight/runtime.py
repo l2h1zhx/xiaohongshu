@@ -152,6 +152,9 @@ def tick(
 
     brands = identify_pending(service, limit=min(10, limit))
     sync = Feishu(service.repo).sync(limit=min(500, max(100, limit)))
+    from .project_hub import sync_hub
+
+    project = sync_hub(service)
     reports = []
     root = Path(
         report_dir
@@ -205,6 +208,7 @@ def tick(
         "brand_identification": brands,
         "sync": sync,
         "reports": reports,
+        "project_hub": project,
         "status": service.status(),
         "backup": _backup(service, now),
         "attention_required": bool(
