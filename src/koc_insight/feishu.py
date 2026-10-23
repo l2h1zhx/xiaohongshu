@@ -130,7 +130,7 @@ class Feishu:
     def business_key(self, nid, brand):
         from .brands import AUTO_BRAND, AUTO_LABELS
 
-        if brand in AUTO_LABELS:
+        if brand in AUTO_LABELS or self.repo.meta("workspace_version") == "2":
             brand = AUTO_BRAND
         prefix = (
             self.table + "\0"
@@ -447,6 +447,10 @@ class Feishu:
         return fields
 
     def configure_review_views(self):
+        if self.repo.meta("workspace_version") == "2":
+            from .workspace import configure_views
+
+            return configure_views(self)
         definitions = {
             "笔记总览": MAIN_FIELDS,
             "24小时表现": ["品牌", "作者昵称", "标题", "发布时间", "24H状态"]
@@ -606,6 +610,11 @@ class Feishu:
                         )
                     else:
                         fields.setdefault("审核结论", "待审核")
+                        if self.repo.meta("workspace_version") == "2":
+                            fields.setdefault("合同验收", "待审核")
+                            fields.setdefault("SKU", "待确认")
+                            fields.setdefault("原创核验", "待核验")
+                            fields.setdefault("披露核验", "待核验")
                         # 飞书 client_token 要求 UUID4；持久保存后重放沿用同一值。
                         token_key = "feishu_client_token:" + key
                         with self.repo.transaction():

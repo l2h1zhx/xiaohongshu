@@ -123,6 +123,10 @@ def create_server(db_path):
         with session() as s:
             root = Path(os.getenv("KOC_REPORT_DIR", "var/reports"))
             filename = "koc-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f") + ".xlsx"
+            if s.repo.meta("workspace_version") == "2":
+                from .workspace import sync_workspace
+
+                sync_workspace(s)
             result = build_report(s.repo, month, root / filename, brand)
             if s.repo.meta("feishu_report_table_id"):
                 from .report_delivery import publish_report

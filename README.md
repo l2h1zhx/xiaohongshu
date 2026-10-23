@@ -23,6 +23,7 @@ uv run --frozen koc run-once
 uv run --frozen koc report --month 2026-10 --output var/reports/品牌A-10月.xlsx
 ```
 
+- [精简项目工作区与统一计数](docs/workspace.md)
 - [统一项目与来源迁移](docs/project.md)
 - [完整使用说明](docs/system.md)
 - [无人值守与加密状态](docs/automation.md)

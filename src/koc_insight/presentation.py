@@ -145,7 +145,11 @@ def month_views(repo, month, brand=None):
 
     unique = {}
     for row in rows:
-        submitted = AUTO_BRAND if row["brand"] in AUTO_LABELS else row["brand"]
+        submitted = (
+            AUTO_BRAND
+            if row["brand"] in AUTO_LABELS or repo.meta("workspace_version") == "2"
+            else row["brand"]
+        )
         key = (row["note_id"], submitted)
         if key not in unique:
             unique[key] = note_view(repo, row["note_id"], submitted, month)

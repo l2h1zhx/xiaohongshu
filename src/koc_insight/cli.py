@@ -186,6 +186,10 @@ def main():
             service.resume()
             result = {"resumed": True}
         elif args.command == "report":
+            if service.repo.meta("workspace_version") == "2":
+                from .workspace import sync_workspace
+
+                sync_workspace(service)
             result = build_report(service.repo, args.month, args.output, args.brand)
             if hasattr(service, "report_dir"):
                 import hashlib

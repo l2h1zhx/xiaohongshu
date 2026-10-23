@@ -1,6 +1,7 @@
 """月报入口与Excel附件；不向任何人发送消息，不代替人工交付审批。"""
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from uuid import uuid4
@@ -139,6 +140,14 @@ def publish_report(
                 service.repo.set_meta("feishu_report_upload_blocked", "")
     views = month_views(service.repo, month, brand)
     unique = {r["note_id"]: r for r in views}
+    contract = json.loads(service.repo.meta("contract_reviews:" + month, "{}"))
+    pending = sum(r["review"] != "通过" for r in unique.values())
+    if service.repo.meta("workspace_version") == "2":
+        pending = sum(
+            not contract.get(nid, {}).get("accepted")
+            and contract.get(nid, {}).get("status") != "不计入"
+            for nid in unique
+        )
     fields = {
         "月份": month,
         "品牌范围": brand or "全部品牌",
@@ -147,7 +156,7 @@ def publish_report(
         "KOC数": len(
             {r["detail"].get("author_id") or r["note_id"] for r in unique.values()}
         ),
-        "待审核数": sum(r["review"] != "通过" for r in unique.values()),
+        "待审核数": pending,
         "品牌待确认数": sum(r["brand"] == "待确认" for r in unique.values()),
         "说明": upload_error
         or "Excel含交付总览、品牌汇总、笔记明细、KOC汇总、24小时表现、内容审核、异常待办与统计说明；采集底稿隐藏保留。人工确认后再向上交付。",
