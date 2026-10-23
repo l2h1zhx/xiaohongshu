@@ -1,9 +1,50 @@
 """精简项目台账：唯一真实笔记作为计数来源，人工合同审核不被采集覆盖。"""
 
+import hashlib
 import json
 
 from .domain import SourceError
 from .feishu import Feishu
+
+NOTE_TYPES = {
+    "标题": 1,
+    "品牌": 1,
+    "作者昵称": 1,
+    "发布时间": 5,
+    "正文": 1,
+    "SKU": 1,
+    "合同验收": 3,
+    "审核依据": 1,
+    "原创核验": 3,
+    "披露核验": 3,
+    "点赞": 2,
+    "收藏": 2,
+    "评论": 2,
+    "分享": 2,
+    "曝光": 2,
+    "阅读": 2,
+    "完整互动量": 2,
+    "数据口径": 1,
+    "关注事项": 1,
+    "24H状态": 1,
+    "24H点赞": 2,
+    "24H收藏": 2,
+    "24H评论": 2,
+    "24H分享": 2,
+    "结案状态": 1,
+    "AI选题": 1,
+    "AI复用建议": 1,
+    "品牌状态": 1,
+    "品牌识别依据": 1,
+    "历史审核批注": 1,
+    "原笔记链接": 15,
+    "Note ID": 1,
+    "作者ID": 1,
+    "业务键": 1,
+    "归属月份": 1,
+    "发布账号": 18,
+    "来源稿件": 1,
+}
 
 
 def contract_result(fields):
@@ -62,13 +103,49 @@ def sync_workspace(service):
     manifest = json.loads(repo.meta("project_migration_tables"))
     client = Feishu(repo)
     base = f"/open-apis/bitable/v1/apps/{client.app}/tables/"
-    rows = list(client.pages(base + manifest["05 笔记与验收"] + "/records"))
-    metrics = workspace_metrics(repo, rows, context["month"])
-    repo.set_meta(
-        "contract_reviews:" + context["month"],
-        json.dumps(metrics["reviews"], ensure_ascii=False),
+    hub_path = (
+        base
+        + manifest["01 项目总控"]
+        + "/records/"
+        + repo.meta("project_hub_record_id")
     )
-    target = context.get("goals", {}).get("contract_minimum", 60)
+    hub = client.request("GET", hub_path)["record"]["fields"]
+    from .domain import month_due
+
+    month = str(hub.get("当前月份", context["month"]))
+    month_due(month)
+    context["month"] = month
+    rows = list(client.pages(base + manifest["05 笔记与验收"] + "/records"))
+    periods = {
+        r["published_month"]
+        for r in repo.rows(
+            "SELECT DISTINCT published_month FROM notes WHERE published_month IS NOT NULL"
+        )
+    } | {month}
+    for period in periods:
+        result = workspace_metrics(repo, rows, period)
+        repo.set_meta(
+            "workspace_metrics:" + period, json.dumps(result, ensure_ascii=False)
+        )
+        repo.set_meta(
+            "contract_reviews:" + period,
+            json.dumps(result["reviews"], ensure_ascii=False),
+        )
+    metrics = json.loads(repo.meta("workspace_metrics:" + month))
+    try:
+        target = int(float(hub["合同底线"]))
+        internal = int(float(hub["内部目标"]))
+    except (ValueError, TypeError, KeyError):
+        raise SourceError("WORKSPACE_INVALID_TARGET") from None
+    if target <= 0 or internal <= 0:
+        raise SourceError("WORKSPACE_INVALID_TARGET")
+    context.setdefault("goals", {}).update(
+        {"contract_minimum": target, "internal_goal": internal}
+    )
+    repo.set_meta(
+        "project_context:" + context["project_id"],
+        json.dumps(context, ensure_ascii=False),
+    )
     coverage = []
     for uid in context.get("authorized_account_ids", []):
         entry = json.loads(repo.meta("account_coverage:" + uid, "{}"))
@@ -118,6 +195,9 @@ def sync_workspace(service):
             base + manifest["03 账号与达人"] + "/records/batch_update",
             json={"records": updates},
         )
+    if repo.meta("workspace_view_month") and repo.meta("workspace_view_month") != month:
+        configure_views(client)
+        repo.set_meta("workspace_view_month", month)
     return {
         "updated": fields != previous or bool(updates),
         "unique_notes": metrics["collected"],
@@ -145,7 +225,18 @@ def configure_views(client):
                 ],
                 [],
             ),
-            "使用说明": (["项目", "交接指南", "预算边界", "合同底线", "内部目标"], []),
+            "使用说明": (
+                [
+                    "项目",
+                    "交接指南",
+                    "品牌与范围",
+                    "合作执行规则",
+                    "预算边界",
+                    "合同底线",
+                    "内部目标",
+                ],
+                [],
+            ),
         },
         "02 任务推进": {
             "现在推进": (
@@ -197,6 +288,8 @@ def configure_views(client):
                     "账号/达人",
                     "当前进度",
                     "合作方式",
+                    "粉丝数（原登记）",
+                    "内容领域",
                     "实际报价",
                     "现金审批",
                     "首发约定",
@@ -216,7 +309,7 @@ def configure_views(client):
                 [
                     "内容编号",
                     "选题",
-                    "对应账号",
+                    "执行账号",
                     "制作人",
                     "内容状态",
                     "计划发布",
@@ -250,6 +343,7 @@ def configure_views(client):
                 [
                     "作者昵称",
                     "标题",
+                    "正文",
                     "SKU",
                     "原创核验",
                     "披露核验",
@@ -261,7 +355,7 @@ def configure_views(client):
             ),
             "合同已通过": (
                 ["品牌", "作者昵称", "标题", "合同验收", "审核依据", "原笔记链接"],
-                [("合同验收", "is", "通过")],
+                [("合同验收", "is", "通过"), ("审核依据", "isNotEmpty", "")],
             ),
             "24小时表现": (
                 [
@@ -283,7 +377,8 @@ def configure_views(client):
                     "标题",
                     "合同验收",
                     "结案状态",
-                    *["结案" + k for k in METRIC_NAMES.values()],
+                    *METRIC_NAMES.values(),
+                    "数据口径",
                     "原笔记链接",
                 ],
                 [],
@@ -296,9 +391,8 @@ def configure_views(client):
                             "Note ID",
                             "作者ID",
                             "来源稿件",
-                            "录入采集时间",
-                            "最新采集时间",
-                            "最新采集阶段",
+                            "数据口径",
+                            "历史审核批注",
                             "正文",
                             "品牌识别依据",
                         ]
@@ -326,7 +420,7 @@ def configure_views(client):
                     "记录编号",
                     "SKU",
                     "产品",
-                    "接收方",
+                    "收件账号",
                     "实际寄出数量",
                     "实际发货日",
                     "物流单号",
@@ -384,7 +478,7 @@ def configure_views(client):
                     "品牌范围",
                     "交付状态",
                     "笔记数",
-                    "KOC数",
+                    "发布账号数",
                     "待审核数",
                     "月报Excel",
                 ],
@@ -414,22 +508,41 @@ def configure_views(client):
                 )["view"]["view_id"]
             prop = {
                 "hidden_fields": [
-                    f["field_id"] for label, f in fields.items() if label not in visible
+                    f["field_id"]
+                    for label, f in fields.items()
+                    if label not in visible
+                    and not f.get("is_primary")
+                    and f["field_id"] != next(iter(fields.values()))["field_id"]
                 ]
             }
+            if name == "05 笔记与验收" and view != "采集底稿" and "归属月份" in fields:
+                current_month = json.loads(
+                    client.repo.meta(
+                        "project_context:" + client.repo.meta("active_project")
+                    )
+                )["month"]
+                filters = filters + [("归属月份", "is", current_month)]
             conditions = []
             for label, operator, value in filters:
                 field = fields[label]
                 options = {
                     o["name"]: o["id"]
-                    for o in field.get("property", {}).get("options", [])
+                    for o in (field.get("property") or {}).get("options", [])
                 }
                 conditions.append(
                     {
                         "field_id": field["field_id"],
+                        "field_type": field["type"],
+                        "condition_id": "con"
+                        + hashlib.sha256(
+                            (field["field_id"] + operator + value).encode()
+                        ).hexdigest()[:8],
                         "operator": operator,
                         "value": json.dumps(
-                            [options.get(value, value)], ensure_ascii=False
+                            []
+                            if operator in ("isEmpty", "isNotEmpty")
+                            else [options.get(value, value)],
+                            ensure_ascii=False,
                         ),
                     }
                 )
@@ -442,3 +555,47 @@ def configure_views(client):
         if name == "05 笔记与验收":
             client.repo.set_meta("feishu_review_default_view", actual["笔记总览"])
     return {"configured_views": configured}
+
+
+def review_contract(service, note_id, decision, evidence=""):
+    if service.repo.meta("workspace_version") != "2":
+        raise ValueError("当前不是精简版工作区")
+    if decision not in ("待审核", "待补证", "通过", "不计入"):
+        raise ValueError("无效合同审核状态")
+    if (
+        not isinstance(evidence, str)
+        or len(evidence) > 6000
+        or decision == "通过"
+        and not evidence.strip()
+    ):
+        raise ValueError("通过须填写用户明确确认的审核依据")
+    source = service.repo.rows("SELECT detail FROM notes WHERE note_id=?", (note_id,))
+    if not source or json.loads(source[0]["detail"]).get("source") != "xhs-downloader":
+        raise ValueError("只能审核已成功采集的真实笔记")
+    c = Feishu(service.repo)
+    matches = c.request(
+        "POST",
+        c.base + "/records/search",
+        json={
+            "filter": {
+                "conjunction": "and",
+                "conditions": [
+                    {"field_name": "Note ID", "operator": "is", "value": [note_id]}
+                ],
+            }
+        },
+    )
+    if len(matches.get("items") or []) != 1 or matches.get("has_more"):
+        raise SourceError("WORKSPACE_NOTE_NOT_UNIQUE")
+    row = matches["items"][0]
+    c.request(
+        "PUT",
+        c.base + "/records/" + row["record_id"],
+        json={"fields": {"合同验收": decision, "审核依据": evidence}},
+    )
+    from datetime import UTC, datetime
+
+    from .domain import stamp
+
+    service.repo.audit(stamp(datetime.now(UTC)), "CONTRACT_REVIEW", note_id, decision)
+    return {"decision": decision, "workspace": sync_workspace(service)}

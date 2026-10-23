@@ -161,6 +161,9 @@ def publish_report(
         "说明": upload_error
         or "Excel含交付总览、品牌汇总、笔记明细、KOC汇总、24小时表现、内容审核、异常待办与统计说明；采集底稿隐藏保留。人工确认后再向上交付。",
     }
+    if service.repo.meta("workspace_version") == "2":
+        fields["发布账号数"] = fields.pop("KOC数")
+        fields["说明"] = fields["说明"].replace("KOC汇总", "发布账号汇总")
     if file_token:
         fields["月报Excel"] = [{"file_token": file_token}]
     else:

@@ -435,15 +435,24 @@ def build_review_report(repo, month, output, brand=None):
             overview,
             ["合同有效笔记", accepted, "唯一Note ID；仅明确通过且有审核依据的记录计数"],
         )
-        append(
-            overview,
-            [
-                "待合同审核",
-                pending,
-                "与飞书笔记与验收使用同一审核状态；采集成功不等于合同通过",
-            ],
-        )
+        for values in overview.iter_rows(min_row=2):
+            if values[0].value == "已登记笔记":
+                values[0].value = "已收录唯一笔记"
+                values[2].value = "按真实Note ID去重；提交次数和短链不计篇数"
+            elif values[0].value == "KOC人数":
+                values[0].value = "发布账号数"
+                values[2].value = "按发布作者ID去重，不代表已确认合作的KOC数"
+            elif values[0].value == "待审核笔记":
+                values[0].value = "待合同审核"
+                values[2].value = "与飞书合同验收一致；未填依据的通过仍待审核"
+        koc.title = "发布账号汇总"
+        for cell in summary[1]:
+            if cell.value == "KOC人数":
+                cell.value = "发布账号数"
         for sheet in (detail, content):
+            for column in range(sheet.max_column, 0, -1):
+                if sheet.cell(1, column).value in ("人工审核结论", "审核备注"):
+                    sheet.delete_cols(column)
             last = sheet.max_column
             sheet.insert_cols(last, 2)
             sheet.cell(1, last, "合同验收")
