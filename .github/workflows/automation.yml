@@ -1,6 +1,12 @@
 name: KOC scheduled collection
 on:
   workflow_dispatch:
+    inputs:
+      retry_brand_images:
+        description: Retry previously unavailable brand images
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 * * * *'
 permissions:
@@ -21,6 +27,7 @@ jobs:
       FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
       KOC_UPSTREAM_ROOT: ${{ github.workspace }}/.runtime/upstream
       KOC_PRIVATE_DIR: ${{ github.workspace }}/var/private
+      KOC_TESSDATA_DIR: ${{ github.workspace }}/.runtime/tessdata
       UV_CACHE_DIR: ${{ github.workspace }}/var/uv-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -42,6 +49,10 @@ jobs:
       - run: python -m pip install uv==0.12.23
       - run: uv sync --frozen --no-dev
       - run: bash scripts/install_xhs.sh
+      - run: bash scripts/install_ocr.sh
+      - name: Retry brand image inspection when requested
+        if: github.event_name == 'workflow_dispatch' && inputs.retry_brand_images
+        run: uv run --frozen --no-dev koc identify-brands --retry-images
       - name: Execute due jobs and persist encrypted state
         run: |
           python - <<'PY'

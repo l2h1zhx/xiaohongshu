@@ -298,11 +298,17 @@ def test_report_links_missing_and_formula_safety(system, tmp_path):
     result = build_report(system.repo, "2026-10", target)
     assert result["notes"] == 1
     book = load_workbook(target)
-    assert len(book.sheetnames) == 4
+    assert len(book.sheetnames) == 9
+    assert book.sheetnames[0] == "交付总览"
+    assert book["采集底稿"].sheet_state == "hidden"
     sheet = book["笔记明细"]
     headers = [c.value for c in sheet[1]]
-    assert sheet.cell(2, headers.index("24H点赞") + 1).value is None
-    assert sheet.cell(2, headers.index("结案曝光") + 1).value is None
+    assert "采集时间" not in "".join(headers)
+    assert sheet.cell(2, headers.index("曝光") + 1).value is None
+    assert sheet.cell(2, headers.index("数据口径") + 1).value == "月结数据"
+    audit = book["采集底稿"]
+    audit_headers = [c.value for c in audit[1]]
+    assert audit.cell(2, audit_headers.index("24H点赞") + 1).value is None
     assert sheet.cell(2, headers.index("标题") + 1).data_type != "f"
     assert sheet.cell(2, sheet.max_column).hyperlink.target == URL
     book.close()

@@ -49,6 +49,10 @@ def parse_upstream(payload: dict) -> Detail:
         description=row.get("作品描述"),
         note_type=row.get("作品类型"),
         tags=row.get("作品标签"),
+        image_urls=row.get("下载地址", [])
+        if row.get("作品类型") in ("图文", "图集")
+        and isinstance(row.get("下载地址"), list)
+        else [],
         image_count=len(row["下载地址"])
         if row.get("作品类型") in ("图文", "图集")
         and isinstance(row.get("下载地址"), list)

@@ -45,9 +45,15 @@ job上限55分钟，采集循环45分钟，每轮最多200项，未完下轮继�
 
 忽略的.env保存非秘密路由：KOC_REMOTE_STATE、KOC_GITHUB_REPO、KOC_STATE_KEY_FILE、KOC_UPSTREAM_ROOT、FEISHU_APP_SECRET_FILE。密钥在/workspace/private，不提交Git。
 
-飞书支持通过 FEISHU_APP_SECRET_FILE 读取私有凭证文件；显式设置该路径后优先使用文件，文件不存在、不可读或内容为空时直接报错，不退回其他凭证。当前云工作区已配置私有文件并通过真实飞书验证（53个字段）；这不代表 GitHub Actions Secrets 已配置。GitHub 的 KOC_STATE_KEY 必须填写密钥文件里的单行内容，不能填写云工作区文件路径。
+飞书支持通过 FEISHU_APP_SECRET_FILE 读取私有凭证文件；显式设置该路径后优先使用文件，文件不存在、不可读或内容为空时直接报错，不退回其他凭证。当前云工作区已配置私有文件并通过真实飞书验证；GitHub Actions Secrets 也已由用户配置并通过独立运行器验证。GitHub 的 KOC_STATE_KEY 必须填写密钥文件里的单行内容，不能填写云工作区文件路径。
 安装用uv sync --frozen和bash scripts/install_xhs.sh；运行用uv run --frozen koc run-once。
 安装器支持KOC_UPSTREAM_ROOT，GitHub运行器不需要/workspace或管理员权限。
 恢复时若远程状态缺失会报错，不创建空库冒充成功。设置启用变量为false或在Actions页面停用workflow可停止后续job。
 私有仓库会被费用前置检查拒绝，避免未经验证的配额/超额费用。
 若运行器不能正常访问小红书，保留错误及当前云端手动触发路线，不声称无人值守已上线。
+
+## 品牌识别与审核报表升级
+
+品牌可省略；文字证据不够时用 Tesseract 中英文OCR辅助（官方 tessdata_fast 固定提交与SHA256核验），不调用付费模型。只处理授权笔记图片，限定CDN、HTTPS、禁止重定向和私网、每张4MB、每条18张、图片不落盘。图片失败不会中断互动数据保存，无法识别保留待确认。安装步骤增加 `bash scripts/install_ocr.sh`；KOC_TESSDATA_DIR 指向语言模型目录。
+
+默认飞书表改为“笔记管理”下的精简视图；原采集表保留。Excel提供8个可见业务sheet和隐藏底稿，固定24小时/月结与当前数据分开；品牌、审核与任务变化会生成新版本。

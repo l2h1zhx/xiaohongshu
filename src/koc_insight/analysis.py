@@ -57,6 +57,13 @@ def review(service, note_id, decision, remarks=""):
             (note_id, decision, remarks[:10000], now),
         )
         service.repo.audit(now, "OPERATOR_REVIEW", note_id, decision)
+        db.execute(
+            """INSERT INTO outbox(snapshot_id,note_id,brand)
+            SELECT MAX(p.id),p.note_id,s.brand FROM snapshots p JOIN submissions s ON s.note_id=p.note_id
+            WHERE p.note_id=? GROUP BY p.note_id,s.brand
+            ON CONFLICT(snapshot_id,brand) DO UPDATE SET status='PENDING',next_retry=0""",
+            (note_id,),
+        )
     return {"decision": decision, "remarks": remarks}
 
 

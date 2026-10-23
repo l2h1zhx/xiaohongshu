@@ -36,7 +36,7 @@ def main():
     parser.add_argument("--db", default=os.getenv("KOC_DB", "var/koc.sqlite3"))
     commands = parser.add_subparsers(dest="command", required=True)
     ingest = commands.add_parser("ingest")
-    ingest.add_argument("--brand", required=True)
+    ingest.add_argument("--brand", default="")
     ingest.add_argument("--text")
     ingest.add_argument("--file", type=Path)
     ingest.add_argument("--requirements", default="")
@@ -62,6 +62,8 @@ def main():
     report = commands.add_parser("report")
     report.add_argument("--month", required=True)
     report.add_argument("--brand")
+    report.add_argument("--publish", action="store_true")
+    report.add_argument("--retry-upload", action="store_true")
     report.add_argument("--output", type=Path, required=True)
     manual_import = commands.add_parser("import-manual")
     manual_import.add_argument("--file", type=Path, required=True)
@@ -76,6 +78,9 @@ def main():
     commands.add_parser("feishu-init")
     commands.add_parser("feishu-sync")
     commands.add_parser("feishu-upgrade")
+    commands.add_parser("feishu-review-layout")
+    brands = commands.add_parser("identify-brands")
+    brands.add_argument("--retry-images", action="store_true")
     annotate_parser = commands.add_parser("annotate")
     annotate_parser.add_argument("note_id")
     for name in ("topic", "format", "selling-points", "reuse-advice"):
@@ -149,6 +154,29 @@ def main():
             result = {"resumed": True}
         elif args.command == "report":
             result = build_report(service.repo, args.month, args.output, args.brand)
+            if hasattr(service, "report_dir"):
+                import hashlib
+                import shutil
+
+                service.report_dir.mkdir(exist_ok=True)
+                filename = (
+                    "report-"
+                    + hashlib.sha256(args.output.read_bytes()).hexdigest()[:20]
+                    + ".xlsx"
+                )
+                shutil.copy2(args.output, service.report_dir / filename)
+                service.repo.set_meta("report_artifact:" + filename, args.month)
+            if args.publish:
+                from .report_delivery import publish_report
+
+                result["publication"] = publish_report(
+                    service,
+                    args.output,
+                    args.month,
+                    result["delivery_status"],
+                    args.brand,
+                    args.retry_upload,
+                )
         elif args.command == "import-manual":
             data = json.loads(args.file.read_text())
             detail = Detail(**data["detail"])
@@ -188,6 +216,14 @@ def main():
             result = Feishu(service.repo).sync()
         elif args.command == "feishu-upgrade":
             result = Feishu(service.repo).upgrade_schema()
+        elif args.command == "feishu-review-layout":
+            client = Feishu(service.repo)
+            client.checkpoint = getattr(service, "checkpoint", lambda: None)
+            result = client.upgrade_review_layout()
+        elif args.command == "identify-brands":
+            from .brands import identify_pending
+
+            result = identify_pending(service, retry_images=args.retry_images)
         elif args.command == "annotate":
             from .analysis import annotate
 

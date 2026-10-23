@@ -40,7 +40,7 @@ def complete_total(counts):
     return sum(values) if all(v is not None for v in values) else None
 
 
-def build_report(repo, month, output, brand=None):
+def _build_audit_report(repo, month, output, brand=None):
     month_due(month)
     output = Path(output)
     if output.exists():
@@ -417,3 +417,9 @@ def build_report(repo, month, output, brand=None):
         "month": month,
         "sheets": book.sheetnames,
     }
+
+
+def build_report(repo, month, output, brand=None):
+    from .review_report import build_review_report
+
+    return build_review_report(repo, month, output, brand)
