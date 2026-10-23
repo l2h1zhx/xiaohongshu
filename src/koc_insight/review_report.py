@@ -99,13 +99,27 @@ def build_review_report(repo, month, output, brand=None):
         book = load_workbook(raw)
     audit = book["笔记明细"]
     audit.title = "采集底稿"
+    audit_seen = set()
     for index in range(audit.max_row, 1, -1):
         nid, submitted = audit.cell(index, 2).value, audit.cell(index, 1).value
         effective, _ = identity(repo, nid, submitted)
-        if brand and effective != brand:
+        if (brand and effective != brand) or (
+            repo.meta("workspace_version") == "2" and nid in audit_seen
+        ):
             audit.delete_rows(index)
         else:
+            audit_seen.add(nid)
             audit.cell(index, 1, text(effective))
+    if repo.meta("workspace_version") == "2":
+        # 清除删行后遗留的空白样式行，底稿筛选范围也按唯一笔记重建。
+        audit_values = [
+            tuple(c.value for c in row) for row in audit.iter_rows() if row[1].value
+        ]
+        book.remove(audit)
+        audit = book.create_sheet("采集底稿")
+        for values in audit_values:
+            audit.append(values)
+        format_sheet(audit)
     for sheet in list(book):
         if sheet != audit:
             book.remove(sheet)

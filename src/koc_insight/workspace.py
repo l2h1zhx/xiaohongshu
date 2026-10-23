@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from uuid import uuid4
 
 from .domain import SourceError
 from .feishu import Feishu
@@ -152,11 +153,11 @@ def sync_workspace(service):
         if entry.get("complete") and entry.get("month") == context["month"]:
             coverage.append(entry.get("checked_at", ""))
     expected = len(context.get("authorized_account_ids", []))
-    coverage_text = f"{len(coverage)}/{expected}账号已核对完整列表"
+    coverage_text = f"{len(coverage)}/{expected} 已核全量"
     if coverage and len(coverage) == expected:
         coverage_text += "；核对截至" + min(coverage)
     else:
-        coverage_text += "；其余待正常登录核验，不能将已收录数视为全量"
+        coverage_text += "；待正常登录核验"
     fields = {
         "当前月份": context["month"],
         "已收录笔记": metrics["collected"],
@@ -179,6 +180,78 @@ def sync_workspace(service):
             "workspace_last_hub_fields", json.dumps(fields, ensure_ascii=False)
         )
     people = list(client.pages(base + manifest["03 账号与达人"] + "/records"))
+    people_by_uid = {p.get("fields", {}).get("平台账号ID"): p for p in people}
+    for uid, count in metrics["authors"].items():
+        if uid in people_by_uid:
+            continue
+        source = next(
+            json.loads(n["detail"])
+            for n in repo.rows(
+                "SELECT detail FROM notes WHERE json_extract(detail,'$.author_id')=?",
+                (uid,),
+            )
+        )
+        sequence = (
+            max(
+                [
+                    int(str(p.get("fields", {}).get("编号", ""))[4:])
+                    for p in people
+                    if str(p.get("fields", {}).get("编号", "")).startswith("PUB-")
+                    and str(p.get("fields", {}).get("编号", ""))[4:].isdigit()
+                ]
+                or [0]
+            )
+            + 1
+        )
+        actor_fields = {
+            "编号": f"PUB-{sequence:03}",
+            "账号/达人": source.get("author_name") or uid,
+            "角色": "已采集账号（归属待确认）",
+            "平台账号ID": uid,
+            "负责人": "项目负责人",
+            "当前进度": "已读取授权笔记；归属与合作待核对",
+            "本月收录笔记": count,
+            "下一步": "核对合作关系和合同资格；不推定已签约",
+            "主页链接": {
+                "text": "查看作者主页",
+                "link": "https://www.xiaohongshu.com/user/profile/" + uid,
+            },
+        }
+        token_key = "workspace_actor_token:" + uid
+        token = repo.meta(token_key) or str(uuid4())
+        repo.set_meta(token_key, token)
+        if hasattr(service, "checkpoint"):
+            service.checkpoint()
+        actor = client.request(
+            "POST",
+            base + manifest["03 账号与达人"] + "/records",
+            params={"client_token": token},
+            json={"fields": actor_fields},
+        )["record"]
+        actor.setdefault("fields", actor_fields)
+        people.append(actor)
+        people_by_uid[uid] = actor
+    note_links = []
+    for row in rows:
+        nid = row.get("fields", {}).get("Note ID")
+        source = (
+            repo.rows("SELECT detail FROM notes WHERE note_id=?", (nid,)) if nid else []
+        )
+        uid = json.loads(source[0]["detail"]).get("author_id") if source else None
+        actor = people_by_uid.get(uid)
+        if actor and row["fields"].get("发布账号") != [actor["record_id"]]:
+            note_links.append(
+                {
+                    "record_id": row["record_id"],
+                    "fields": {"发布账号": [actor["record_id"]]},
+                }
+            )
+    for i in range(0, len(note_links), 100):
+        client.request(
+            "POST",
+            base + manifest["05 笔记与验收"] + "/records/batch_update",
+            json={"records": note_links[i : i + 100]},
+        )
     updates = []
     for row in people:
         uid = row.get("fields", {}).get("平台账号ID")
@@ -216,6 +289,8 @@ def configure_views(client):
                 [
                     "项目",
                     "当前月份",
+                    "合同底线",
+                    "内部目标",
                     "已收录笔记",
                     "合同有效笔记",
                     "待合同审核",
@@ -239,7 +314,7 @@ def configure_views(client):
             ),
         },
         "02 任务推进": {
-            "现在推进": (
+            "P0优先推进": (
                 [
                     "任务编号",
                     "执行事项",
@@ -250,9 +325,13 @@ def configure_views(client):
                     "下一步",
                     "进展与证据",
                 ],
-                [("状态", "isNot", "已完成"), ("状态", "isNot", "已暂停")],
+                [
+                    ("状态", "isNot", "已完成"),
+                    ("状态", "isNot", "已暂停"),
+                    ("优先级", "is", "P0"),
+                ],
             ),
-            "交接与验收": (
+            "全部任务": (
                 [
                     "任务编号",
                     "执行事项",
@@ -339,7 +418,7 @@ def configure_views(client):
                 ],
                 [],
             ),
-            "待合同审核": (
+            "合同审核": (
                 [
                     "作者昵称",
                     "标题",
@@ -351,11 +430,7 @@ def configure_views(client):
                     "审核依据",
                     "原笔记链接",
                 ],
-                [("合同验收", "isNot", "通过"), ("合同验收", "isNot", "不计入")],
-            ),
-            "合同已通过": (
-                ["品牌", "作者昵称", "标题", "合同验收", "审核依据", "原笔记链接"],
-                [("合同验收", "is", "通过"), ("审核依据", "isNotEmpty", "")],
+                [],
             ),
             "24小时表现": (
                 [
@@ -492,6 +567,18 @@ def configure_views(client):
         path = base + manifest[name]
         fields = {f["field_name"]: f for f in client.pages(path + "/fields")}
         actual = {v["view_name"]: v["view_id"] for v in client.pages(path + "/views")}
+        if name == "02 任务推进":
+            for old_name, new_name in (
+                ("现在推进", "P0优先推进"),
+                ("交接与验收", "全部任务"),
+            ):
+                if old_name in actual and new_name not in actual:
+                    client.request(
+                        "PATCH",
+                        path + "/views/" + actual[old_name],
+                        json={"view_name": new_name},
+                    )
+                    actual[new_name] = actual.pop(old_name)
         # 使用创建时的默认视图，避免额外保留空白“工作台”视图。
         if "工作台" in actual:
             first = next(iter(views))
@@ -499,6 +586,10 @@ def configure_views(client):
                 "PATCH", path + "/views/" + actual["工作台"], json={"view_name": first}
             )
             actual[first] = actual.pop("工作台")
+        if name == "05 笔记与验收":
+            for obsolete in ("待合同审核", "合同已通过"):
+                if obsolete in actual:
+                    client.request("DELETE", path + "/views/" + actual.pop(obsolete))
         for view, (visible, filters) in views.items():
             if view not in actual:
                 actual[view] = client.request(
