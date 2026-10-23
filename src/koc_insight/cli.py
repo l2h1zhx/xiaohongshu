@@ -165,6 +165,7 @@ def main():
                     + ".xlsx"
                 )
                 shutil.copy2(args.output, service.report_dir / filename)
+                service.repo.set_meta("report_artifact:" + filename, args.month)
             if args.publish:
                 from .report_delivery import publish_report
 

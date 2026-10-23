@@ -118,6 +118,7 @@ def create_server(db_path):
 
                 s.report_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(root / filename, s.report_dir / filename)
+                s.repo.set_meta("report_artifact:" + filename, month)
             return result
 
     @mcp.tool()
