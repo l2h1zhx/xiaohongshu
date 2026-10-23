@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.env
+var/
+*.sqlite*
+*.xlsx
+.DS_Store
+.runtime/
+*.enc
+
