@@ -433,8 +433,12 @@ class Feishu:
                 **{METRIC_NAMES[k]: view["counts"].get(k) for k in METRICS},
             }
         )
-        # 没有智能体记录的人工结论时，不清空用户在飞书填写的审核字段。
-        if self.repo.rows("SELECT 1 FROM reviews WHERE note_id=? LIMIT 1", (nid,)):
+        # 只推送新的明确审核指令；之后刷新指标不能重放旧结论覆盖飞书手填值。
+        reviews = self.repo.rows(
+            "SELECT id FROM reviews WHERE note_id=? ORDER BY id DESC LIMIT 1", (nid,)
+        )
+        acknowledged = int(self.repo.meta("feishu_review_ack:" + business_key, "0"))
+        if reviews and reviews[0]["id"] > acknowledged:
             fields.update({"审核结论": view["review"], "审核备注": view["remarks"]})
         return fields
 
@@ -613,6 +617,15 @@ class Feishu:
                         )
                         record_id = data["record"]["record_id"]
                     with self.repo.transaction() as db:
+                        if "审核结论" in fields:
+                            review = db.execute(
+                                "SELECT id FROM reviews WHERE note_id=? ORDER BY id DESC LIMIT 1",
+                                (event["note_id"],),
+                            ).fetchone()
+                            if review:
+                                self.repo.set_meta(
+                                    "feishu_review_ack:" + key, str(review[0])
+                                )
                         db.execute(
                             "INSERT OR REPLACE INTO feishu_records VALUES(?,?)",
                             (key, record_id),
