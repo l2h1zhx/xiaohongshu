@@ -282,6 +282,8 @@ def sync_workspace(service):
                 "PARTIAL": "部分目录已读取，未核全量",
                 "BLOCKED": "目录受限，待补采",
             }[entry["status"]]
+            if entry.get("error") == "PROFILE_LOGIN_REQUIRED":
+                status = "当前目录要求登录，待补采"
             if repo.meta("profile_listing_circuit") and entry["status"] == "PENDING":
                 status = "等待目录访问恢复"
             if row.get("fields", {}).get("主页采集状态") != status:

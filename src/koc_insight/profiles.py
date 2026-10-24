@@ -53,6 +53,8 @@ def parse_directory(html, uid):
         r"window\.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*;?\s*</script>", html, re.S
     )
     if not match:
+        if "扫码登录" in html or "手机号登录" in html:
+            raise SourceError("PROFILE_LOGIN_REQUIRED", block=True)
         raise SourceError("PROFILE_DIRECTORY_UNAVAILABLE")
     try:
         # 仅替换JSON值位置的undefined，不执行外部JavaScript。
@@ -111,6 +113,12 @@ def read_directory(url, client=None):
                     if not target:
                         raise SourceError("INVALID_REDIRECT")
                     url = urljoin(url, target)
+                    destination = urlsplit(url)
+                    if (
+                        destination.hostname in HOSTS
+                        and destination.path.rstrip("/") == "/login"
+                    ):
+                        raise SourceError("PROFILE_LOGIN_REQUIRED", block=True)
                     continue
                 if response.status_code in (403, 429):
                     raise SourceError("PROFILE_ACCESS_RESTRICTED", block=True)
