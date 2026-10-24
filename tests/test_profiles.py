@@ -94,3 +94,22 @@ def test_registered_homepage_is_not_an_unresolved_note_in_export(system, tmp_pat
     book = load_workbook(path)
     assert book["异常与待补采"].max_row == 1
     book.close()
+
+
+def test_profile_login_redirect_is_reported_without_following_login(monkeypatch):
+    import httpx
+
+    from koc_insight.profiles import read_directory
+
+    monkeypatch.setattr("koc_insight.profiles.public_dns", lambda _: None)
+    seen = []
+
+    def respond(request):
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"location": "/login?redirectPath=private"})
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(SourceError) as error:
+            read_directory(URL, client)
+    assert error.value.code == "PROFILE_LOGIN_REQUIRED" and error.value.block
+    assert seen == [URL]
