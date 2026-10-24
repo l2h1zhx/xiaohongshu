@@ -163,6 +163,11 @@ def publish_report(
     }
     if service.repo.meta("workspace_version") == "2":
         fields["发布账号数"] = fields.pop("KOC数")
+        fields["已收录笔记"] = fields.pop("笔记数")
+        fields["待合同审核"] = fields.pop("待审核数")
+        fields["合同有效笔记"] = sum(
+            bool(contract.get(nid, {}).get("accepted")) for nid in unique
+        )
         fields["说明"] = fields["说明"].replace("KOC汇总", "发布账号汇总")
     if file_token:
         fields["月报Excel"] = [{"file_token": file_token}]

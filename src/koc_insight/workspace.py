@@ -157,7 +157,9 @@ def sync_workspace(service):
     if coverage and len(coverage) == expected:
         coverage_text += "；核对截至" + min(coverage)
     else:
-        coverage_text += "；待正常登录核验"
+        coverage_text += "；" + repo.meta(
+            "account_listing_blocked_reason", "待正常登录核验"
+        )
     fields = {
         "当前月份": context["month"],
         "已收录笔记": metrics["collected"],
@@ -552,9 +554,10 @@ def configure_views(client):
                     "月份",
                     "品牌范围",
                     "交付状态",
-                    "笔记数",
+                    "已收录笔记",
+                    "合同有效笔记",
                     "发布账号数",
-                    "待审核数",
+                    "待合同审核",
                     "月报Excel",
                 ],
                 [],

@@ -178,7 +178,13 @@ def tick(
             (
                 REPORT_VERSION
                 + json.dumps(
-                    {"tasks": tasks, "review": month_views(service.repo, month)},
+                    {
+                        "tasks": tasks,
+                        "review": month_views(service.repo, month),
+                        "contract_review": json.loads(
+                            service.repo.meta("contract_reviews:" + month, "{}")
+                        ),
+                    },
                     sort_keys=True,
                 )
             ).encode()

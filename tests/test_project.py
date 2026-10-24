@@ -305,7 +305,7 @@ def test_workspace_report_keeps_one_contract_count_and_link_last(system, tmp_pat
     assert book["采集底稿"].max_row == 2
     assert labels.count("待合同审核") == 1
     assert labels.count("合同有效笔记") == 1
-    assert "已收录唯一笔记" in labels
+    assert "已收录笔记" in labels
     for name in ("笔记明细", "内容与审核"):
         sheet = book[name]
         headers = [c.value for c in sheet[1]]

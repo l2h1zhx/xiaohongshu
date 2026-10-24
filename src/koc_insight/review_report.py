@@ -17,7 +17,7 @@ from .presentation import month_views
 from .report import LABELS, _build_audit_report, display_time, text
 from .urls import validate_url
 
-REPORT_VERSION = "review-v3-contract"
+REPORT_VERSION = "workspace-contract-v4"
 BLUE = "174E63"
 TEAL = "D9EDEA"
 AMBER = "FFF0CD"
@@ -451,7 +451,7 @@ def build_review_report(repo, month, output, brand=None):
         )
         for values in overview.iter_rows(min_row=2):
             if values[0].value == "已登记笔记":
-                values[0].value = "已收录唯一笔记"
+                values[0].value = "已收录笔记"
                 values[2].value = "按真实Note ID去重；提交次数和短链不计篇数"
             elif values[0].value == "KOC人数":
                 values[0].value = "发布账号数"
@@ -461,6 +461,8 @@ def build_review_report(repo, month, output, brand=None):
                 values[2].value = "与飞书合同验收一致；未填依据的通过仍待审核"
         koc.title = "发布账号汇总"
         for cell in summary[1]:
+            if cell.value == "笔记数":
+                cell.value = "已收录笔记"
             if cell.value == "KOC人数":
                 cell.value = "发布账号数"
         for sheet in (detail, content):
