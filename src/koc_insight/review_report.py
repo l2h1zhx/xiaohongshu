@@ -151,10 +151,20 @@ def build_review_report(repo, month, output, brand=None):
         for r in unknown
         if not brand or identity(repo, r["note_id"], r["brand"])[0] == brand
     ]
+    scope_coverage = None
+    if repo.meta("workspace_version") == "2" and repo.meta("active_project"):
+        from .project_hub import get_context
+        from .workspace import coverage_summary
+
+        scope_coverage = coverage_summary(repo, get_context(repo), month)
     current_month = month_due(month) > datetime.now(UTC)
     delivery = (
         "本月进行中，尚未月结"
         if current_month
+        else "账号清单待核全；仅已收录部分"
+        if scope_coverage
+        and scope_coverage["required"]
+        and not scope_coverage["complete"]
         else "待补齐数据"
         if complete != len(unique) or unresolved or unknown
         else "待审核"
@@ -444,6 +454,15 @@ def build_review_report(repo, month, output, brand=None):
     ]:
         append(notes, values)
     if repo.meta("workspace_version") == "2":
+        if scope_coverage and scope_coverage["required"]:
+            append(
+                overview,
+                [
+                    "账号全量核验",
+                    f"{scope_coverage['verified']}/{scope_coverage['expected']}",
+                    "按正常完整列表或用户明确确认的完整清单核验；已收录数不等于账号全量",
+                ],
+            )
         accepted = sum(bool(contract.get(nid, {}).get("accepted")) for nid in unique)
         append(
             overview,
