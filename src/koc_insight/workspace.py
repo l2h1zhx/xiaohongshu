@@ -49,7 +49,11 @@ def coverage_summary(repo, context, month):
 
     from .domain import SH, month_due, parse_time
 
-    expected = set(context.get("authorized_account_ids", []))
+    expected = (
+        set()
+        if context.get("collection_mode") == "note_links"
+        else set(context.get("authorized_account_ids", []))
+    )
     now = datetime.now(UTC)
     end = (
         month_due(month)
@@ -286,6 +290,8 @@ def sync_workspace(service):
                 status = "当前目录要求登录，待补采"
             if repo.meta("profile_listing_circuit") and entry["status"] == "PENDING":
                 status = "等待目录访问恢复"
+            if repo.meta("collection_mode") == "note_links":
+                status = "主页采集已暂停，按笔记链接收录"
             if row.get("fields", {}).get("主页采集状态") != status:
                 changed["主页采集状态"] = status
         if changed:

@@ -113,3 +113,20 @@ def test_profile_login_redirect_is_reported_without_following_login(monkeypatch)
             read_directory(URL, client)
     assert error.value.code == "PROFILE_LOGIN_REQUIRED" and error.value.block
     assert seen == [URL]
+
+
+def test_note_links_mode_never_fetches_queued_profiles(system):
+    from koc_insight.workspace import coverage_summary
+
+    system.ingest(URL)
+    system.repo.set_meta("collection_mode", "note_links")
+    original = system.repo.meta("profile_requests")
+    result = collect_profiles(
+        system, reader=lambda _: pytest.fail("directory must stay paused")
+    )
+    assert result["processed"] == 0 and result["disabled"] == "NOTE_LINKS_MODE"
+    assert system.repo.meta("profile_requests") == original
+    context = {"authorized_account_ids": [UID], "collection_mode": "note_links"}
+    assert coverage_summary(system.repo, context, "2026-10")["required"] is False
+    context.pop("collection_mode")
+    assert coverage_summary(system.repo, context, "2026-10")["complete"] is False

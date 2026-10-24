@@ -141,6 +141,13 @@ def read_directory(url, client=None):
 
 
 def collect_profiles(service, reader=read_directory, limit=1):
+    if service.repo.meta("collection_mode") == "note_links":
+        return {
+            "processed": 0,
+            "discovered_links": 0,
+            "blocked": 0,
+            "disabled": "NOTE_LINKS_MODE",
+        }
     entries = json.loads(service.repo.meta("profile_requests", "{}"))
     result = {"processed": 0, "discovered_links": 0, "blocked": 0}
     if service.repo.meta("profile_listing_circuit"):
