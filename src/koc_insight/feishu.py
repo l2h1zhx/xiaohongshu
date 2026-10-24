@@ -628,10 +628,7 @@ class Feishu:
                         if self.repo.meta("workspace_version") != "2":
                             fields.setdefault("审核结论", "待审核")
                         if self.repo.meta("workspace_version") == "2":
-                            fields.setdefault("合同验收", "待审核")
                             fields.setdefault("SKU", "待确认")
-                            fields.setdefault("原创核验", "待核验")
-                            fields.setdefault("披露核验", "待核验")
                         # 飞书 client_token 要求 UUID4；持久保存后重放沿用同一值。
                         token_key = "feishu_client_token:" + key
                         with self.repo.transaction():

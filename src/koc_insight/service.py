@@ -26,7 +26,7 @@ class Service:
         with self.repo.transaction() as db:
             for raw in urls:
                 try:
-                    validate_url(raw)
+                    validate_url(raw, allow_profiles=True)
                     status, error = "PENDING", None
                 except SourceError as e:
                     status, error = "INVALID", e.code
@@ -40,7 +40,15 @@ class Service:
                     result["invalid"] += 1
                 else:
                     result["accepted"] += 1
-                    if note_id(raw):
+                    from .profiles import profile_id, register_profile
+
+                    if profile_id(raw):
+                        register_profile(self, raw)
+                        db.execute(
+                            "UPDATE submissions SET status='PROFILE_REGISTERED' WHERE id=?",
+                            (cursor.lastrowid,),
+                        )
+                    elif note_id(raw):
                         self._attach(cursor.lastrowid, validate_url(raw), now)
             self.repo.audit(stamp(now), "INGEST", brand, dump(result))
         return result
@@ -99,7 +107,16 @@ class Service:
             try:
                 url = resolver.resolve(row["url"])
                 with self.repo.transaction():
-                    self._attach(row["id"], url, now)
+                    from .profiles import profile_id, register_profile
+
+                    if profile_id(url):
+                        register_profile(self, url)
+                        self.repo.db.execute(
+                            "UPDATE submissions SET status='PROFILE_REGISTERED',error=NULL WHERE id=?",
+                            (row["id"],),
+                        )
+                    else:
+                        self._attach(row["id"], url, now)
             except SourceError as e:
                 attempts = row["attempts"] + 1
                 retry = e.retryable and attempts < 3

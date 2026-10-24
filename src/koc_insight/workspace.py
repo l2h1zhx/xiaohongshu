@@ -1,4 +1,4 @@
-"""精简项目台账：唯一真实笔记作为计数来源，人工合同审核不被采集覆盖。"""
+"""精简项目台账：唯一真实笔记作为计数来源，采集与项目推进共用一份真实数据。"""
 
 import hashlib
 import json
@@ -14,10 +14,6 @@ NOTE_TYPES = {
     "发布时间": 5,
     "正文": 1,
     "SKU": 1,
-    "合同验收": 3,
-    "审核依据": 1,
-    "原创核验": 3,
-    "披露核验": 3,
     "点赞": 2,
     "收藏": 2,
     "评论": 2,
@@ -81,13 +77,6 @@ def coverage_summary(repo, context, month):
     }
 
 
-def contract_result(fields):
-    status = fields.get("合同验收") or "待审核"
-    evidence = fields.get("审核依据") or ""
-    accepted = status == "通过" and isinstance(evidence, str) and bool(evidence.strip())
-    return {"status": status, "evidence": evidence, "accepted": accepted}
-
-
 def workspace_metrics(repo, rows, month):
     actual = {
         r["note_id"]: json.loads(r["detail"])
@@ -97,7 +86,7 @@ def workspace_metrics(repo, rows, month):
         )
         if json.loads(r["detail"]).get("source") == "xhs-downloader"
     }
-    seen, accepted, pending, missing_evidence, reviews = set(), 0, 0, 0, {}
+    seen = set()
     authors = {}
     for row in rows:
         fields = row.get("fields", {})
@@ -107,11 +96,6 @@ def workspace_metrics(repo, rows, month):
         if nid in seen:
             raise SourceError("WORKSPACE_DUPLICATE_NOTE_ID")
         seen.add(nid)
-        review = contract_result(fields)
-        reviews[nid] = review
-        accepted += review["accepted"]
-        pending += not review["accepted"] and review["status"] != "不计入"
-        missing_evidence += review["status"] == "通过" and not review["accepted"]
         uid = actual[nid].get("author_id")
         if uid:
             authors[uid] = authors.get(uid, 0) + 1
@@ -119,10 +103,6 @@ def workspace_metrics(repo, rows, month):
         raise SourceError("WORKSPACE_MISSING_COLLECTED_NOTES")
     return {
         "collected": len(seen),
-        "accepted": accepted,
-        "pending": pending,
-        "missing_approval_evidence": missing_evidence,
-        "reviews": reviews,
         "authors": authors,
     }
 
@@ -161,13 +141,9 @@ def sync_workspace(service):
         repo.set_meta(
             "workspace_metrics:" + period, json.dumps(result, ensure_ascii=False)
         )
-        repo.set_meta(
-            "contract_reviews:" + period,
-            json.dumps(result["reviews"], ensure_ascii=False),
-        )
     metrics = json.loads(repo.meta("workspace_metrics:" + month))
     try:
-        target = int(float(hub["合同底线"]))
+        target = int(float(hub.get("月度目标", hub.get("合同底线"))))
         internal = int(float(hub["内部目标"]))
     except (ValueError, TypeError, KeyError):
         raise SourceError("WORKSPACE_INVALID_TARGET") from None
@@ -186,16 +162,14 @@ def sync_workspace(service):
         coverage_text += "；核对截至" + str(coverage["checked_at"])
     elif coverage["required"]:
         coverage_text += "；" + repo.meta(
-            "account_listing_blocked_reason", "待正常登录核验"
+            "account_listing_blocked_reason", "完整目录待补采"
         )
     else:
         coverage_text = "按已提供链接收录；未配置账号全量范围"
     fields = {
         "当前月份": context["month"],
         "已收录笔记": metrics["collected"],
-        "合同有效笔记": metrics["accepted"],
-        "待合同审核": metrics["pending"],
-        "合同缺口": max(0, target - metrics["accepted"]),
+        "目标缺口": max(0, target - metrics["collected"]),
         "覆盖状态": coverage_text,
     }
     previous = json.loads(repo.meta("workspace_last_hub_fields", "{}"))
@@ -213,15 +187,23 @@ def sync_workspace(service):
         )
     people = list(client.pages(base + manifest["03 账号与达人"] + "/records"))
     people_by_uid = {p.get("fields", {}).get("平台账号ID"): p for p in people}
-    for uid, count in metrics["authors"].items():
+    profile_requests = json.loads(repo.meta("profile_requests", "{}"))
+    requested = {
+        entry["uid"] for entry in profile_requests.values() if entry["month"] == month
+    }
+    for uid in sorted(set(metrics["authors"]) | requested):
+        count = metrics["authors"].get(uid, 0)
         if uid in people_by_uid:
             continue
         source = next(
-            json.loads(n["detail"])
-            for n in repo.rows(
-                "SELECT detail FROM notes WHERE json_extract(detail,'$.author_id')=?",
-                (uid,),
-            )
+            (
+                json.loads(n["detail"])
+                for n in repo.rows(
+                    "SELECT detail FROM notes WHERE json_extract(detail,'$.author_id')=?",
+                    (uid,),
+                )
+            ),
+            {},
         )
         sequence = (
             max(
@@ -241,9 +223,9 @@ def sync_workspace(service):
             "角色": "归属待确认",
             "平台账号ID": uid,
             "负责人": "项目负责人",
-            "当前进度": "已读取授权笔记；归属与合作待核对",
+            "当前进度": "已登记授权账号；归属与合作待核对",
             "本月收录笔记": count,
-            "下一步": "核对合作关系和合同资格；不推定已签约",
+            "下一步": "核对账号归属，按当前进度推进合作",
             "主页链接": {
                 "text": "查看作者主页",
                 "link": "https://www.xiaohongshu.com/user/profile/" + uid,
@@ -290,10 +272,22 @@ def sync_workspace(service):
         count = metrics["authors"].get(uid, 0)
         current = row.get("fields", {}).get("本月收录笔记")
         # 保存当前月份，字段名不将固定10月写入业务逻辑。
+        changed = {}
         if current is None or float(current) != count:
-            updates.append(
-                {"record_id": row["record_id"], "fields": {"本月收录笔记": count}}
-            )
+            changed["本月收录笔记"] = count
+        entry = profile_requests.get(str(uid) + ":" + month)
+        if entry:
+            status = {
+                "PENDING": "目录待采集",
+                "PARTIAL": "部分目录已读取，未核全量",
+                "BLOCKED": "目录受限，待补采",
+            }[entry["status"]]
+            if repo.meta("profile_listing_circuit") and entry["status"] == "PENDING":
+                status = "等待目录访问恢复"
+            if row.get("fields", {}).get("主页采集状态") != status:
+                changed["主页采集状态"] = status
+        if changed:
+            updates.append({"record_id": row["record_id"], "fields": changed})
     if updates:
         client.request(
             "POST",
@@ -306,8 +300,6 @@ def sync_workspace(service):
     return {
         "updated": fields != previous or bool(updates),
         "unique_notes": metrics["collected"],
-        "contract_accepted": metrics["accepted"],
-        "attention_required": bool(metrics["missing_approval_evidence"]),
     }
 
 
@@ -321,12 +313,10 @@ def configure_views(client):
                 [
                     "项目",
                     "当前月份",
-                    "合同底线",
+                    "月度目标",
                     "内部目标",
                     "已收录笔记",
-                    "合同有效笔记",
-                    "待合同审核",
-                    "合同缺口",
+                    "目标缺口",
                     "覆盖状态",
                     "当前行动",
                 ],
@@ -339,7 +329,7 @@ def configure_views(client):
                     "品牌与范围",
                     "合作执行规则",
                     "预算边界",
-                    "合同底线",
+                    "月度目标",
                     "内部目标",
                 ],
                 [],
@@ -388,30 +378,10 @@ def configure_views(client):
                     "负责人",
                     "当前进度",
                     "本月收录笔记",
+                    "主页采集状态",
                     "下一步",
                     "主页链接",
                 ],
-                [],
-            ),
-            "合作跟进": (
-                [
-                    "编号",
-                    "账号/达人",
-                    "当前进度",
-                    "合作方式",
-                    "粉丝数（原登记）",
-                    "内容领域",
-                    "实际报价",
-                    "现金审批",
-                    "首发约定",
-                    "联系信息",
-                    "合作凭证",
-                    "主页链接",
-                ],
-                [("角色", "is", "外部KOC")],
-            ),
-            "主体与披露核验": (
-                ["编号", "账号/达人", "角色", "核验事项", "平台账号ID", "主页链接"],
                 [],
             ),
         },
@@ -444,22 +414,17 @@ def configure_views(client):
                     "标题",
                     "发布时间",
                     "SKU",
-                    "合同验收",
                     *METRIC_NAMES.values(),
                     "原笔记链接",
                 ],
                 [],
             ),
-            "合同审核": (
+            "内容查看": (
                 [
                     "作者昵称",
                     "标题",
                     "正文",
                     "SKU",
-                    "原创核验",
-                    "披露核验",
-                    "合同验收",
-                    "审核依据",
                     "原笔记链接",
                 ],
                 [],
@@ -482,7 +447,6 @@ def configure_views(client):
                     "品牌",
                     "作者昵称",
                     "标题",
-                    "合同验收",
                     "结案状态",
                     *METRIC_NAMES.values(),
                     "数据口径",
@@ -585,9 +549,7 @@ def configure_views(client):
                     "品牌范围",
                     "交付状态",
                     "已收录笔记",
-                    "合同有效笔记",
                     "发布账号数",
-                    "待合同审核",
                     "月报Excel",
                 ],
                 [],
@@ -620,7 +582,11 @@ def configure_views(client):
             )
             actual[first] = actual.pop("工作台")
         if name == "05 笔记与验收":
-            for obsolete in ("待合同审核", "合同已通过"):
+            for obsolete in ("待合同审核", "合同已通过", "合同审核"):
+                if obsolete in actual:
+                    client.request("DELETE", path + "/views/" + actual.pop(obsolete))
+        if name == "03 账号与达人":
+            for obsolete in ("合作跟进", "主体与披露核验"):
                 if obsolete in actual:
                     client.request("DELETE", path + "/views/" + actual.pop(obsolete))
         for view, (visible, filters) in views.items():
@@ -679,47 +645,3 @@ def configure_views(client):
         if name == "05 笔记与验收":
             client.repo.set_meta("feishu_review_default_view", actual["笔记总览"])
     return {"configured_views": configured}
-
-
-def review_contract(service, note_id, decision, evidence=""):
-    if service.repo.meta("workspace_version") != "2":
-        raise ValueError("当前不是精简版工作区")
-    if decision not in ("待审核", "待补证", "通过", "不计入"):
-        raise ValueError("无效合同审核状态")
-    if (
-        not isinstance(evidence, str)
-        or len(evidence) > 6000
-        or decision == "通过"
-        and not evidence.strip()
-    ):
-        raise ValueError("通过须填写用户明确确认的审核依据")
-    source = service.repo.rows("SELECT detail FROM notes WHERE note_id=?", (note_id,))
-    if not source or json.loads(source[0]["detail"]).get("source") != "xhs-downloader":
-        raise ValueError("只能审核已成功采集的真实笔记")
-    c = Feishu(service.repo)
-    matches = c.request(
-        "POST",
-        c.base + "/records/search",
-        json={
-            "filter": {
-                "conjunction": "and",
-                "conditions": [
-                    {"field_name": "Note ID", "operator": "is", "value": [note_id]}
-                ],
-            }
-        },
-    )
-    if len(matches.get("items") or []) != 1 or matches.get("has_more"):
-        raise SourceError("WORKSPACE_NOTE_NOT_UNIQUE")
-    row = matches["items"][0]
-    c.request(
-        "PUT",
-        c.base + "/records/" + row["record_id"],
-        json={"fields": {"合同验收": decision, "审核依据": evidence}},
-    )
-    from datetime import UTC, datetime
-
-    from .domain import stamp
-
-    service.repo.audit(stamp(datetime.now(UTC)), "CONTRACT_REVIEW", note_id, decision)
-    return {"decision": decision, "workspace": sync_workspace(service)}

@@ -201,7 +201,7 @@ def test_legacy_auto_brand_alias_does_not_duplicate_notes(system):
     )
 
 
-def test_contract_pass_needs_explicit_evidence_and_reconciles_unique_source(system):
+def test_workspace_reconciles_unique_collected_source_without_contract_gate(system):
     from koc_insight.workspace import workspace_metrics
 
     nid = "f" * 24
@@ -218,14 +218,7 @@ def test_contract_pass_needs_explicit_evidence_and_reconciles_unique_source(syst
         )
     rows = [{"fields": {"Note ID": nid, "合同验收": "通过", "审核依据": ""}}]
     m = workspace_metrics(system.repo, rows, "2026-10")
-    assert (
-        m["collected"],
-        m["accepted"],
-        m["pending"],
-        m["missing_approval_evidence"],
-    ) == (1, 0, 1, 1)
-    rows[0]["fields"]["审核依据"] = "负责人核对SKU、原创和披露后确认"
-    assert workspace_metrics(system.repo, rows, "2026-10")["accepted"] == 1
+    assert m == {"collected": 1, "authors": {"a" * 24: 1}}
     with pytest.raises(Exception, match="WORKSPACE_DUPLICATE_NOTE_ID"):
         workspace_metrics(system.repo, rows * 2, "2026-10")
     with pytest.raises(Exception, match="WORKSPACE_MISSING_COLLECTED_NOTES"):
@@ -257,7 +250,7 @@ def test_native_plan_checks_enum_dates_and_attachments():
         validate_plan(plan)
 
 
-def test_workspace_report_keeps_one_contract_count_and_link_last(system, tmp_path):
+def test_workspace_report_removes_contract_flow_and_keeps_link_last(system, tmp_path):
     from datetime import datetime
 
     from openpyxl import load_workbook
@@ -303,15 +296,14 @@ def test_workspace_report_keeps_one_contract_count_and_link_last(system, tmp_pat
     book = load_workbook(path)
     labels = [r[0].value for r in book["交付总览"].iter_rows(min_row=2)]
     assert book["采集底稿"].max_row == 2
-    assert labels.count("待合同审核") == 1
-    assert labels.count("合同有效笔记") == 1
+    assert "待合同审核" not in labels
+    assert "合同有效笔记" not in labels
     assert "已收录笔记" in labels
     for name in ("笔记明细", "内容与审核"):
         sheet = book[name]
         headers = [c.value for c in sheet[1]]
         assert headers[-1] == "查看原笔记"
-        assert "合同验收" in headers and "人工审核结论" not in headers
-        assert sheet.cell(2, headers.index("合同验收") + 1).value == "待补证"
+        assert "合同验收" not in headers and "人工审核结论" not in headers
     book.close()
 
 

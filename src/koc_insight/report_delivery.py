@@ -1,7 +1,6 @@
 """月报入口与Excel附件；不向任何人发送消息，不代替人工交付审批。"""
 
 import hashlib
-import json
 import re
 from pathlib import Path
 from uuid import uuid4
@@ -140,14 +139,7 @@ def publish_report(
                 service.repo.set_meta("feishu_report_upload_blocked", "")
     views = month_views(service.repo, month, brand)
     unique = {r["note_id"]: r for r in views}
-    contract = json.loads(service.repo.meta("contract_reviews:" + month, "{}"))
     pending = sum(r["review"] != "通过" for r in unique.values())
-    if service.repo.meta("workspace_version") == "2":
-        pending = sum(
-            not contract.get(nid, {}).get("accepted")
-            and contract.get(nid, {}).get("status") != "不计入"
-            for nid in unique
-        )
     fields = {
         "月份": month,
         "品牌范围": brand or "全部品牌",
@@ -164,10 +156,7 @@ def publish_report(
     if service.repo.meta("workspace_version") == "2":
         fields["发布账号数"] = fields.pop("KOC数")
         fields["已收录笔记"] = fields.pop("笔记数")
-        fields["待合同审核"] = fields.pop("待审核数")
-        fields["合同有效笔记"] = sum(
-            bool(contract.get(nid, {}).get("accepted")) for nid in unique
-        )
+        fields.pop("待审核数", None)
         fields["说明"] = fields["说明"].replace("KOC汇总", "发布账号汇总")
     if file_token:
         fields["月报Excel"] = [{"file_token": file_token}]

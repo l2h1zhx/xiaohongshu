@@ -1,6 +1,5 @@
 """先看交付结论，再看明细和待办；技术底稿默认隐藏。"""
 
-import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +16,7 @@ from .presentation import month_views
 from .report import LABELS, _build_audit_report, display_time, text
 from .urls import validate_url
 
-REPORT_VERSION = "workspace-contract-v4"
+REPORT_VERSION = "workspace-simple-v5"
 BLUE = "174E63"
 TEAL = "D9EDEA"
 AMBER = "FFF0CD"
@@ -135,16 +134,11 @@ def build_review_report(repo, month, output, brand=None):
     unique = {r["note_id"]: r for r in rows}
     complete = sum(bool(r["monthly"]) for r in unique.values())
     pending = sum(r["review"] != "通过" for r in unique.values())
-    contract = json.loads(repo.meta("contract_reviews:" + month, "{}"))
     if repo.meta("workspace_version") == "2":
-        pending = sum(
-            not contract.get(nid, {}).get("accepted")
-            and contract.get(nid, {}).get("status") != "不计入"
-            for nid in unique
-        )
+        pending = 0  # 不以已移除的合同流程阻止生成月报；交付仍由用户确认。
     unresolved = sum(r["brand"] == "待确认" for r in unique.values())
     unknown = repo.rows(
-        "SELECT DISTINCT s.note_id,s.brand,s.url,s.error FROM submissions s LEFT JOIN notes n ON n.note_id=s.note_id WHERE n.published_month IS NULL"
+        "SELECT DISTINCT s.note_id,s.brand,s.url,s.error FROM submissions s LEFT JOIN notes n ON n.note_id=s.note_id WHERE n.published_month IS NULL AND s.status!='PROFILE_REGISTERED'"
     )
     unknown = [
         r
@@ -169,6 +163,8 @@ def build_review_report(repo, month, output, brand=None):
         if complete != len(unique) or unresolved or unknown
         else "待审核"
         if pending
+        else "数据已整理，待你确认交付"
+        if repo.meta("workspace_version") == "2"
         else "审核记录已通过，可准备交付"
     )
     if not unique:
@@ -463,11 +459,6 @@ def build_review_report(repo, month, output, brand=None):
                     "按正常完整列表或用户明确确认的完整清单核验；已收录数不等于账号全量",
                 ],
             )
-        accepted = sum(bool(contract.get(nid, {}).get("accepted")) for nid in unique)
-        append(
-            overview,
-            ["合同有效笔记", accepted, "唯一Note ID；仅明确通过且有审核依据的记录计数"],
-        )
         for values in overview.iter_rows(min_row=2):
             if values[0].value == "已登记笔记":
                 values[0].value = "已收录笔记"
@@ -475,9 +466,6 @@ def build_review_report(repo, month, output, brand=None):
             elif values[0].value == "KOC人数":
                 values[0].value = "发布账号数"
                 values[2].value = "按发布作者ID去重，不代表已确认合作的KOC数"
-            elif values[0].value == "待审核笔记":
-                values[0].value = "待合同审核"
-                values[2].value = "与飞书合同验收一致；未填依据的通过仍待审核"
         koc.title = "发布账号汇总"
         for cell in summary[1]:
             if cell.value == "笔记数":
@@ -488,14 +476,13 @@ def build_review_report(repo, month, output, brand=None):
             for column in range(sheet.max_column, 0, -1):
                 if sheet.cell(1, column).value in ("人工审核结论", "审核备注"):
                     sheet.delete_cols(column)
-            last = sheet.max_column
-            sheet.insert_cols(last, 2)
-            sheet.cell(1, last, "合同验收")
-            sheet.cell(1, last + 1, "合同审核依据")
-            for i, item in enumerate(rows, 2):
-                review = contract.get(item["note_id"], {})
-                sheet.cell(i, last, text(review.get("status", "待审核")))
-                sheet.cell(i, last + 1, text(review.get("evidence", "")))
+        for sheet in (summary, koc):
+            for column in range(sheet.max_column, 0, -1):
+                if sheet.cell(1, column).value == "待审核数":
+                    sheet.delete_cols(column)
+        for index in range(overview.max_row, 1, -1):
+            if overview.cell(index, 1).value == "待审核笔记":
+                overview.delete_rows(index)
     for sheet in book:
         if sheet != audit:
             format_sheet(sheet)

@@ -15,7 +15,10 @@ SHORT_HOSTS = {"xhslink.com", "xhslink.cn"}
 NOTE = re.compile(r"^/(?:explore|discovery/item)/([0-9a-f]{24})/?$")
 
 
-def validate_url(url: str) -> str:
+PROFILE = re.compile(r"^/user/profile/([0-9a-f]{24})/?$")
+
+
+def validate_url(url: str, *, allow_profiles=False) -> str:
     try:
         parts = urlsplit(url)
         if (
@@ -28,7 +31,11 @@ def validate_url(url: str) -> str:
             or "\\" in url
         ):
             raise ValueError
-        if parts.hostname not in SHORT_HOSTS and not NOTE.fullmatch(parts.path):
+        if parts.hostname not in SHORT_HOSTS and not (
+            NOTE.fullmatch(parts.path)
+            or allow_profiles
+            and PROFILE.fullmatch(parts.path)
+        ):
             raise ValueError
         if parts.hostname in SHORT_HOSTS and parts.path in ("", "/"):
             raise ValueError
@@ -71,8 +78,8 @@ class Resolver:
 
     def resolve(self, url: str) -> str:
         for _ in range(6):
-            url = validate_url(url)
-            if note_id(url):
+            url = validate_url(url, allow_profiles=True)
+            if PROFILE.fullmatch(urlsplit(url).path) or note_id(url):
                 return url
             self.check_dns(urlsplit(url).hostname)
             try:
