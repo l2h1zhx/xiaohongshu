@@ -40,8 +40,6 @@ def counts(repo, context):
         metrics = json.loads(repo.meta("workspace_metrics:" + context["month"], "{}"))
         return {
             "已收录笔记": metrics.get("collected"),
-            "合同有效笔记": metrics.get("accepted"),
-            "待合同审核": metrics.get("pending"),
         }
     accounts = context.get("authorized_account_ids", [])
     urls = context.get("authorized_note_urls", [])

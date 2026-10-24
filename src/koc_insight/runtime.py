@@ -128,6 +128,9 @@ def tick(
         checkpoint=getattr(service, "checkpoint", None),
         deadline=started + deadline_seconds,
     )
+    from .profiles import collect_profiles
+
+    collect_profiles(service)
     owns = collector is None
     collector = collector or IsolatedCollector()
     processed = 0
@@ -181,9 +184,6 @@ def tick(
                     {
                         "tasks": tasks,
                         "review": month_views(service.repo, month),
-                        "contract_review": json.loads(
-                            service.repo.meta("contract_reviews:" + month, "{}")
-                        ),
                     },
                     sort_keys=True,
                 )
