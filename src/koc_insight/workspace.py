@@ -48,6 +48,39 @@ NOTE_TYPES = {
 }
 
 
+def coverage_summary(repo, context, month):
+    from datetime import UTC, datetime
+
+    from .domain import SH, month_due, parse_time
+
+    expected = set(context.get("authorized_account_ids", []))
+    now = datetime.now(UTC)
+    end = (
+        month_due(month)
+        .astimezone(SH)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+    )
+    threshold = end if now >= end else parse_time(month + "-01T00:00:00+08:00")
+    checked = []
+    for uid in expected:
+        entry = json.loads(repo.meta("account_coverage:" + uid, "{}"))
+        if not entry.get("complete") or entry.get("month") != month:
+            continue
+        try:
+            instant = parse_time(entry["checked_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if threshold <= instant <= now:
+            checked.append(entry["checked_at"])
+    return {
+        "required": bool(expected),
+        "verified": len(checked),
+        "expected": len(expected),
+        "complete": not expected or len(checked) == len(expected),
+        "checked_at": min(checked) if checked else None,
+    }
+
+
 def contract_result(fields):
     status = fields.get("合同验收") or "待审核"
     evidence = fields.get("审核依据") or ""
@@ -147,19 +180,16 @@ def sync_workspace(service):
         "project_context:" + context["project_id"],
         json.dumps(context, ensure_ascii=False),
     )
-    coverage = []
-    for uid in context.get("authorized_account_ids", []):
-        entry = json.loads(repo.meta("account_coverage:" + uid, "{}"))
-        if entry.get("complete") and entry.get("month") == context["month"]:
-            coverage.append(entry.get("checked_at", ""))
-    expected = len(context.get("authorized_account_ids", []))
-    coverage_text = f"{len(coverage)}/{expected} 已核全量"
-    if coverage and len(coverage) == expected:
-        coverage_text += "；核对截至" + min(coverage)
-    else:
+    coverage = coverage_summary(repo, context, context["month"])
+    coverage_text = f"{coverage['verified']}/{coverage['expected']} 已核全量"
+    if coverage["required"] and coverage["complete"]:
+        coverage_text += "；核对截至" + str(coverage["checked_at"])
+    elif coverage["required"]:
         coverage_text += "；" + repo.meta(
             "account_listing_blocked_reason", "待正常登录核验"
         )
+    else:
+        coverage_text = "按已提供链接收录；未配置账号全量范围"
     fields = {
         "当前月份": context["month"],
         "已收录笔记": metrics["collected"],
@@ -208,7 +238,7 @@ def sync_workspace(service):
         actor_fields = {
             "编号": f"PUB-{sequence:03}",
             "账号/达人": source.get("author_name") or uid,
-            "角色": "已采集账号（归属待确认）",
+            "角色": "归属待确认",
             "平台账号ID": uid,
             "负责人": "项目负责人",
             "当前进度": "已读取授权笔记；归属与合作待核对",
@@ -378,7 +408,7 @@ def configure_views(client):
                     "合作凭证",
                     "主页链接",
                 ],
-                [("角色", "is", "待合作KOC")],
+                [("角色", "is", "外部KOC")],
             ),
             "主体与披露核验": (
                 ["编号", "账号/达人", "角色", "核验事项", "平台账号ID", "主页链接"],

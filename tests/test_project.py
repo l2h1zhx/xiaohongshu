@@ -444,4 +444,34 @@ def test_new_note_registers_publisher_once_and_links_without_changing_review(
         note["fields"]["合同验收"] == "待补证"
         and note["fields"]["审核依据"] == "用户要求补原文证据"
     )
-    assert people[0]["fields"]["角色"] == "已采集账号（归属待确认）"
+    assert people[0]["fields"]["角色"] == "归属待确认"
+
+
+def test_month_end_coverage_requires_a_complete_check_after_month_end(system):
+    from koc_insight.workspace import coverage_summary
+
+    uid = "b" * 24
+    context = {"authorized_account_ids": [uid]}
+    key = "account_coverage:" + uid
+    system.repo.set_meta(
+        key,
+        json.dumps(
+            {
+                "complete": True,
+                "month": "2026-09",
+                "checked_at": "2026-09-25T12:00:00+08:00",
+            }
+        ),
+    )
+    assert coverage_summary(system.repo, context, "2026-09")["verified"] == 0
+    system.repo.set_meta(
+        key,
+        json.dumps(
+            {
+                "complete": True,
+                "month": "2026-09",
+                "checked_at": "2026-10-01T12:00:00+08:00",
+            }
+        ),
+    )
+    assert coverage_summary(system.repo, context, "2026-09")["complete"] is True
