@@ -274,6 +274,17 @@ def test_workspace_report_keeps_one_contract_count_and_link_last(system, tmp_pat
     system.run(
         MockCollector(), now=datetime(2026, 10, 15, 11, tzinfo=SH), min_interval=0
     )
+    with system.repo.transaction() as db:
+        db.execute(
+            "INSERT INTO submissions(brand,url,submitted_at,note_id,status) VALUES(?,?,?,?,?)",
+            (
+                "授权验证（品牌待确认）",
+                "https://www.xiaohongshu.com/explore/" + nid + "?old=1",
+                "2026-10-15T11:00:00+08:00",
+                nid,
+                "REGISTERED",
+            ),
+        )
     system.repo.set_meta("workspace_version", "2")
     system.repo.set_meta(
         "contract_reviews:2026-10",
@@ -291,9 +302,10 @@ def test_workspace_report_keeps_one_contract_count_and_link_last(system, tmp_pat
     build_report(system.repo, "2026-10", path)
     book = load_workbook(path)
     labels = [r[0].value for r in book["交付总览"].iter_rows(min_row=2)]
+    assert book["采集底稿"].max_row == 2
     assert labels.count("待合同审核") == 1
     assert labels.count("合同有效笔记") == 1
-    assert "已收录唯一笔记" in labels
+    assert "已收录笔记" in labels
     for name in ("笔记明细", "内容与审核"):
         sheet = book[name]
         headers = [c.value for c in sheet[1]]
@@ -339,3 +351,97 @@ def test_workspace_sync_omits_duplicate_stage_columns_and_preserves_contract_fie
         ),
     )
     assert c.diagnostic()["required_fields"] == len(NOTE_TYPES) < 40
+
+
+def test_new_note_registers_publisher_once_and_links_without_changing_review(
+    system, monkeypatch
+):
+    from koc_insight.workspace import sync_workspace
+
+    nid, uid = "e" * 24, "b" * 24
+    with system.repo.transaction() as db:
+        db.execute(
+            "INSERT INTO notes(note_id,url,first_submitted,published_month,detail) VALUES(?,?,?,?,?)",
+            (
+                nid,
+                "https://example.invalid",
+                "now",
+                "2026-10",
+                json.dumps(
+                    {
+                        "source": "xhs-downloader",
+                        "author_id": uid,
+                        "author_name": "测试作者",
+                    }
+                ),
+            ),
+        )
+    context = {
+        "project_id": "test",
+        "month": "2026-10",
+        "authorized_account_ids": [uid],
+    }
+    for key, value in {
+        "workspace_version": "2",
+        "active_project": "test",
+        "project_context:test": json.dumps(context),
+        "project_migration_tables": json.dumps(
+            {"01 项目总控": "hub", "03 账号与达人": "people", "05 笔记与验收": "notes"}
+        ),
+        "project_hub_record_id": "summary",
+    }.items():
+        system.repo.set_meta(key, value)
+    note = {
+        "record_id": "note",
+        "fields": {
+            "Note ID": nid,
+            "合同验收": "待补证",
+            "审核依据": "用户要求补原文证据",
+            "发布账号": [],
+        },
+    }
+    people = []
+    created = []
+
+    class Client:
+        app = "base"
+
+        def __init__(self, repo):
+            self.repo = repo
+
+        def pages(self, path):
+            return people if "/people/" in path else [note]
+
+        def request(self, method, path, **kwargs):
+            if method == "GET":
+                return {
+                    "record": {
+                        "fields": {
+                            "当前月份": "2026-10",
+                            "合同底线": 60,
+                            "内部目标": 100,
+                        }
+                    }
+                }
+            if path.endswith("/people/records"):
+                actor = {
+                    "record_id": "author",
+                    "fields": deepcopy(kwargs["json"]["fields"]),
+                }
+                people.append(actor)
+                created.append(actor)
+                return {"record": deepcopy(actor)}
+            if path.endswith("/notes/records/batch_update"):
+                note["fields"].update(kwargs["json"]["records"][0]["fields"])
+            return {}
+
+    monkeypatch.setattr("koc_insight.workspace.Feishu", Client)
+    sync_workspace(system)
+    sync_workspace(system)
+    assert len(created) == 1 and people[0]["fields"]["本月收录笔记"] == 1
+    assert note["fields"]["发布账号"] == ["author"]
+    assert (
+        note["fields"]["合同验收"] == "待补证"
+        and note["fields"]["审核依据"] == "用户要求补原文证据"
+    )
+    assert people[0]["fields"]["角色"] == "已采集账号（归属待确认）"
