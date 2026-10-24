@@ -138,7 +138,7 @@ def build_review_report(repo, month, output, brand=None):
         pending = 0  # 不以已移除的合同流程阻止生成月报；交付仍由用户确认。
     unresolved = sum(r["brand"] == "待确认" for r in unique.values())
     unknown = repo.rows(
-        "SELECT DISTINCT s.note_id,s.brand,s.url,s.error FROM submissions s LEFT JOIN notes n ON n.note_id=s.note_id WHERE n.published_month IS NULL"
+        "SELECT DISTINCT s.note_id,s.brand,s.url,s.error FROM submissions s LEFT JOIN notes n ON n.note_id=s.note_id WHERE n.published_month IS NULL AND s.status!='PROFILE_REGISTERED'"
     )
     unknown = [
         r

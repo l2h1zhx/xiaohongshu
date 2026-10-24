@@ -80,3 +80,17 @@ def test_restriction_stops_other_account_attempts(system):
         ]
         == 0
     )
+
+
+def test_registered_homepage_is_not_an_unresolved_note_in_export(system, tmp_path):
+    from openpyxl import load_workbook
+
+    from koc_insight.report import build_report
+
+    system.ingest(URL)
+    system.repo.set_meta("workspace_version", "2")
+    path = tmp_path / "empty.xlsx"
+    build_report(system.repo, "2026-10", path)
+    book = load_workbook(path)
+    assert book["异常与待补采"].max_row == 1
+    book.close()

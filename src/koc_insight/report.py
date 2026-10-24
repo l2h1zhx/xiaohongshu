@@ -339,7 +339,7 @@ def _build_audit_report(repo, month, output, brand=None):
         )
     # 未解析/发布时间未知的提交不能悄悄从月报消失。
     for row in repo.rows(
-        "SELECT s.* FROM submissions s LEFT JOIN notes n ON n.note_id=s.note_id WHERE (s.note_id IS NULL OR n.published_month IS NULL)"
+        "SELECT s.* FROM submissions s LEFT JOIN notes n ON n.note_id=s.note_id WHERE (s.note_id IS NULL OR n.published_month IS NULL) AND s.status!='PROFILE_REGISTERED'"
         + (" AND s.brand=?" if brand else ""),
         (brand,) if brand else (),
     ):
