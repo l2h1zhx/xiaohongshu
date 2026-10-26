@@ -167,7 +167,11 @@ def import_plan(service, plan):
                 "source_rows": len(target["records"]),
             }
         )
-    repo.set_meta("project_migration_source_hash", plan["source_sha256"])
+    # 新增观察资料不能覆盖历史项目原表的溯源信息。
+    for target in plan["tables"]:
+        repo.set_meta(
+            "project_migration_source_hash:" + target["name"], plan["source_sha256"]
+        )
     return {"tables": results, "complete": True}
 
 
