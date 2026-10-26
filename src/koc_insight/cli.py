@@ -44,6 +44,8 @@ def main():
     project.add_argument("--context-file", type=Path, required=True)
     migration = commands.add_parser("project-import")
     migration.add_argument("--plan-file", type=Path, required=True)
+    observation = commands.add_parser("import-natural-observations")
+    observation.add_argument("--file", type=Path, required=True)
     source = commands.add_parser("source-inspect")
     source.add_argument("--file", type=Path, required=True)
     source.add_argument("--output", type=Path, required=True)
@@ -157,6 +159,10 @@ def main():
             from .project_import import import_plan
 
             result = import_plan(service, json.loads(args.plan_file.read_text()))
+        elif args.command == "import-natural-observations":
+            from .observations import import_observations
+
+            result = import_observations(service, args.file)
         elif args.command == "project-hub":
             from .project_hub import sync_hub
 
