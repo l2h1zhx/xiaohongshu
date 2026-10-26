@@ -1,6 +1,9 @@
+from datetime import datetime
+
 from openpyxl import Workbook
 
-from koc_insight.observations import TABLE_NAME, observation_plan
+from koc_insight.domain import SH, Detail
+from koc_insight.observations import TABLE_NAME, natural_link_plan, observation_plan
 
 
 def _sheet(book, name, rows):
@@ -87,3 +90,25 @@ def test_observation_plan_rejects_duplicate_note_ids(tmp_path):
         assert "重复 Note ID" in str(error)
     else:
         raise AssertionError("duplicate Note ID should be rejected")
+
+
+def test_natural_link_plan_is_one_time_and_excluded_from_delivery():
+    detail = Detail(
+        note_id="a" * 24,
+        author_id="b" * 24,
+        author_name="自然作者",
+        title="品牌自然笔记",
+        description="正文",
+        note_type="图文",
+        tags="品牌",
+        published_at=datetime(2026, 10, 26, 12, tzinfo=SH).isoformat(),
+        counts={"likes": 3, "collects": 2},
+    )
+    plan = natural_link_plan(
+        [{"detail": detail, "link": "https://www.xiaohongshu.com/explore/" + "a" * 24}]
+    )
+    record = plan["tables"][0]["records"][0]
+    assert record["作者ID"] == "b" * 24
+    assert record["点赞"] == 3
+    assert "自动刷新" in record["数据口径"]
+    assert "月报" in record["关联说明"]
