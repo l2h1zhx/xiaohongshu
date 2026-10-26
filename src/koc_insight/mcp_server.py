@@ -51,6 +51,14 @@ def create_server(db_path):
             return s.ingest(read_links(path), brand, requirements)
 
     @mcp.tool()
+    def register_natural_observations(text: str) -> dict:
+        """一次性归档用户提供的品牌自然笔记链接：不进入投放、24小时跟踪或月报。"""
+        from .observations import import_natural_links
+
+        with session() as s:
+            return import_natural_links(s, text)
+
+    @mcp.tool()
     def identify_note_brand(note_id: str, brand: str, evidence: str) -> dict:
         """根据已读取正文或OCR的逐字证据识别品牌；品牌不确定时不猜测，不等于人工审核通过。"""
         from .brands import classify
