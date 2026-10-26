@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from zipfile import ZipFile
@@ -11,6 +12,7 @@ from openpyxl import load_workbook
 from .domain import SH
 from .feishu import Feishu
 from .project_import import import_plan
+from .urls import Resolver, extract_urls
 
 TABLE_NAME = "09 品牌自然观察"
 SOURCE_LABEL = "vishin_wanxie_filtered_notes.xlsx"
@@ -20,6 +22,7 @@ FIELDS = {
     "观察状态": 3,
     "关联说明": 1,
     "命中关键词": 1,
+    "作者ID": 1,
     "作者昵称": 1,
     "发布时间": 5,
     "笔记类型": 1,
@@ -153,6 +156,7 @@ def observation_plan(path):
 
 def import_observations(service, path):
     """幂等导入；不调用小红书、不进入业务 notes 表。"""
+    _ensure_observation_schema(service)
     plan = observation_plan(path)
     result = import_plan(service, plan)
     result["views"] = configure_observation_views(service)
@@ -161,6 +165,202 @@ def import_observations(service, path):
         str({"source": SOURCE_LABEL, "records": len(plan["tables"][0]["records"])}),
     )
     return {**result, "delivery_excluded": True, "one_time_capture": True}
+
+
+def natural_link_plan(details, source_label="用户手工提交链接"):
+    """把已采集的公开详情转换为自然观察行，不进入业务 notes 表。"""
+    records = []
+    for item in details:
+        detail, link = item["detail"], item["link"]
+        record = {
+            "笔记标题": detail.title or "无标题",
+            "Note ID": detail.note_id,
+            "观察状态": "相关",
+            "关联说明": "用户提交的品牌自然笔记；非项目投放，不纳入月报",
+            "作者ID": detail.author_id or "",
+            "作者昵称": detail.author_name or "",
+            "笔记类型": detail.note_type or "",
+            "正文摘要": detail.description or "",
+            "话题": detail.tags or "",
+            "数据口径": "录入时的单次公开采集；不自动刷新，不纳入项目交付",
+            "原笔记链接": {"text": "查看原笔记", "link": link},
+            "来源文件": source_label,
+            "来源键": "natural:" + detail.note_id,
+        }
+        if detail.published_at:
+            record["发布时间"] = int(
+                datetime.fromisoformat(detail.published_at).timestamp() * 1000
+            )
+        for source, target in (
+            ("likes", "点赞"),
+            ("collects", "收藏"),
+            ("comments", "评论"),
+            ("shares", "分享"),
+        ):
+            value = detail.counts.get(source)
+            if value is not None:
+                record[target] = value
+        records.append(record)
+    keys = [record["来源键"] for record in records]
+    if len(keys) != len(set(keys)):
+        raise ValueError("提交链接解析为重复 Note ID")
+    source = "\n".join(sorted(item["link"] for item in details)).encode()
+    return {
+        "source_sha256": hashlib.sha256(source).hexdigest(),
+        "tables": [
+            {
+                "name": TABLE_NAME,
+                "fields": FIELDS,
+                "field_properties": {
+                    "观察状态": {
+                        "options": [
+                            {"name": "相关", "color": 0},
+                            {"name": "待复核", "color": 1},
+                        ]
+                    }
+                },
+                "hidden_fields": ["来源键"],
+                "records": records,
+            }
+        ],
+    }
+
+
+def import_natural_links(service, text, resolver=None, collector=None, interval=5):
+    """一次性采集用户给出的笔记链接；失败项不写入飞书。"""
+    urls = list(dict.fromkeys(extract_urls(text)))
+    if not urls:
+        raise ValueError("没有找到小红书笔记链接")
+    if len(urls) > 200:
+        raise ValueError("一次最多处理200条自然观察链接")
+    resolver = resolver or Resolver()
+    owns_collector = collector is None
+    if owns_collector:
+        from .runtime import IsolatedCollector
+
+        collector = IsolatedCollector()
+    collected, failures = [], []
+    try:
+        for index, url in enumerate(urls):
+            try:
+                resolved = resolver.resolve(url)
+                detail = collector.collect(resolved)
+                collected.append({"detail": detail, "link": resolved})
+            except Exception as error:  # 单条失败不可污染其余已采集结果。
+                failures.append(
+                    {"url": url, "error": getattr(error, "code", str(error))}
+                )
+            if index + 1 < len(urls) and interval:
+                time.sleep(interval)
+    finally:
+        if owns_collector:
+            collector.close()
+    # 一次提交中的不同短链可能指向同一笔记；只保留首条，不重复写入。
+    unique = {}
+    for item in collected:
+        unique.setdefault(item["detail"].note_id, item)
+    plan = natural_link_plan(list(unique.values())) if unique else None
+    if not plan:
+        return {
+            "submitted": len(urls),
+            "captured": 0,
+            "failed": failures,
+            "delivery_excluded": True,
+            "one_time_capture": True,
+        }
+    _ensure_observation_schema(service)
+    result = import_plan(service, plan)
+    result["views"] = configure_observation_views(service)
+    result["accounts"] = sync_observation_accounts(service, list(unique.values()))
+    return {
+        **result,
+        "submitted": len(urls),
+        "captured": len(unique),
+        "failed": failures,
+        "delivery_excluded": True,
+        "one_time_capture": True,
+    }
+
+
+def _ensure_observation_schema(service):
+    """旧表创建于作者ID字段之前时，只补充该字段，不修改已有观察数据。"""
+    manifest = json.loads(service.repo.meta("project_migration_tables", "{}"))
+    table = manifest.get(TABLE_NAME)
+    if not table:
+        return
+    client = Feishu(service.repo)
+    path = f"/open-apis/bitable/v1/apps/{client.app}/tables/{table}"
+    fields = {field["field_name"]: field for field in client.pages(path + "/fields")}
+    if "作者ID" not in fields:
+        client.request(
+            "POST", path + "/fields", json={"field_name": "作者ID", "type": 1}
+        )
+
+
+def sync_observation_accounts(service, details):
+    """自然笔记作者进入同一账号名册，但独立于投放篇数。"""
+    manifest = json.loads(service.repo.meta("project_migration_tables", "{}"))
+    table = manifest.get("03 账号与达人")
+    if not table:
+        raise ValueError("账号与达人表尚未建立")
+    client = Feishu(service.repo)
+    path = f"/open-apis/bitable/v1/apps/{client.app}/tables/{table}"
+    fields = {field["field_name"]: field for field in client.pages(path + "/fields")}
+    if "自然观察笔记数" not in fields:
+        client.request(
+            "POST", path + "/fields", json={"field_name": "自然观察笔记数", "type": 2}
+        )
+    rows = list(client.pages(path + "/records"))
+    by_uid = {
+        row.get("fields", {}).get("平台账号ID"): row
+        for row in rows
+        if row.get("fields", {}).get("平台账号ID")
+    }
+    counts, names = {}, {}
+    for item in details:
+        detail = item["detail"]
+        if detail.author_id:
+            counts[detail.author_id] = counts.get(detail.author_id, 0) + 1
+            names.setdefault(detail.author_id, detail.author_name or detail.author_id)
+    created, updates = 0, []
+    existing_numbers = {str(row.get("fields", {}).get("编号", "")) for row in rows}
+    sequence = 1
+    for uid in sorted(counts):
+        if uid in by_uid:
+            row = by_uid[uid]
+            if row.get("fields", {}).get("自然观察笔记数") != counts[uid]:
+                updates.append(
+                    {
+                        "record_id": row["record_id"],
+                        "fields": {"自然观察笔记数": counts[uid]},
+                    }
+                )
+            continue
+        while f"OBS-{sequence:03}" in existing_numbers:
+            sequence += 1
+        fields = {
+            "编号": f"OBS-{sequence:03}",
+            "账号/达人": names[uid],
+            "平台账号ID": uid,
+            "当前进度": "品牌自然观察；非投放，不纳入月报",
+            "自然观察笔记数": counts[uid],
+            "下一步": "仅作品牌自然内容观察，无需合作跟进",
+            "主页链接": {
+                "text": "查看作者主页",
+                "link": "https://www.xiaohongshu.com/user/profile/" + uid,
+            },
+        }
+        client.request("POST", path + "/records", json={"fields": fields})
+        existing_numbers.add(fields["编号"])
+        sequence += 1
+        created += 1
+    for start in range(0, len(updates), 100):
+        client.request(
+            "POST",
+            path + "/records/batch_update",
+            json={"records": updates[start : start + 100]},
+        )
+    return {"created": created, "updated": len(updates), "unique_accounts": len(counts)}
 
 
 def configure_observation_views(service):

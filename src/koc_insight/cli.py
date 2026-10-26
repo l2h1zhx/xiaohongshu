@@ -46,6 +46,10 @@ def main():
     migration.add_argument("--plan-file", type=Path, required=True)
     observation = commands.add_parser("import-natural-observations")
     observation.add_argument("--file", type=Path, required=True)
+    natural_links = commands.add_parser("import-natural-links")
+    natural_links.add_argument("--text")
+    natural_links.add_argument("--file", type=Path)
+    natural_links.add_argument("--interval", type=float, default=5)
     source = commands.add_parser("source-inspect")
     source.add_argument("--file", type=Path, required=True)
     source.add_argument("--output", type=Path, required=True)
@@ -163,6 +167,15 @@ def main():
             from .observations import import_observations
 
             result = import_observations(service, args.file)
+        elif args.command == "import-natural-links":
+            from .observations import import_natural_links
+
+            content = args.text
+            if args.file:
+                content = args.file.read_text(encoding="utf-8")
+            result = import_natural_links(
+                service, content or "", interval=args.interval
+            )
         elif args.command == "project-hub":
             from .project_hub import sync_hub
 
