@@ -217,6 +217,7 @@ def test_actual_mcp_stdio_handshake(tmp_path):
                     tools = await client.list_tools()
                     assert {
                         "register_notes",
+                        "register_natural_observations",
                         "get_status",
                         "collect_due",
                         "export_month",
