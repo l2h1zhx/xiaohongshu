@@ -55,7 +55,7 @@ def counts(repo, context):
             ("已采集笔记", "人工审核通过", "待审核笔记", "其他审核状态笔记")
         )
     rows = repo.rows(
-        "SELECT note_id,detail FROM notes WHERE published_month=? AND detail!='{}'",
+        "SELECT note_id,detail FROM delivery_notes WHERE published_month=? AND detail!='{}'",
         (context["month"],),
     )
     actual = [

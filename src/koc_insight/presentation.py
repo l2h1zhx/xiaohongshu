@@ -29,7 +29,7 @@ def total(counts):
 
 
 def note_view(repo, nid, association, month=None):
-    row = repo.rows("SELECT * FROM notes WHERE note_id=?", (nid,))[0]
+    row = repo.rows("SELECT * FROM delivery_notes WHERE note_id=?", (nid,))[0]
     current = json.loads(row["detail"])
     month = month or row["published_month"]
     snapshots = repo.rows(
@@ -90,6 +90,11 @@ def note_view(repo, nid, association, month=None):
         else "MISSING"
     )
     issues = []
+    if row["assignment_reason"]:
+        issues.append(
+            f"交付归属调整：实际发布于{row['actual_published_month']}，"
+            f"归入{row['published_month']}；{row['assignment_reason']}"
+        )
     if not brand or brand == "待确认":
         issues.append("品牌待确认")
     if brand_state == "多品牌待确认":
@@ -138,7 +143,7 @@ def note_view(repo, nid, association, month=None):
 
 def month_views(repo, month, brand=None):
     rows = repo.rows(
-        "SELECT DISTINCT n.note_id,s.brand FROM notes n JOIN submissions s ON s.note_id=n.note_id WHERE n.published_month=? ORDER BY n.published_at,n.note_id",
+        "SELECT DISTINCT n.note_id,s.brand FROM delivery_notes n JOIN submissions s ON s.note_id=n.note_id WHERE n.published_month=? ORDER BY n.published_at,n.note_id",
         (month,),
     )
     from .brands import AUTO_BRAND, AUTO_LABELS

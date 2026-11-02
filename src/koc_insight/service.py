@@ -138,7 +138,7 @@ class Service:
         now = utc(now or datetime.now(UTC))
         with self.repo.transaction():
             for note in self.repo.rows(
-                "SELECT * FROM notes WHERE published_at IS NOT NULL"
+                "SELECT * FROM delivery_notes WHERE published_at IS NOT NULL"
             ):
                 published = parse_time(note["published_at"])
                 due = published + timedelta(hours=24)
@@ -152,7 +152,7 @@ class Service:
                     "MISSED" if missed else "PENDING",
                     "LATE_SUBMISSION" if missed else None,
                 )
-                month = published.astimezone(SH).strftime("%Y-%m")
+                month = note["published_month"]
                 # 不依赖“今天是否为 1 号”；停机恢复后补建所有已到期月结任务。
                 if month_due(month) <= now:
                     self._job(note["note_id"], "MONTHLY", month, month_due(month), now)

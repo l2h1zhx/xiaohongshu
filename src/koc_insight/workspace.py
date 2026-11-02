@@ -85,7 +85,7 @@ def workspace_metrics(repo, rows, month):
     actual = {
         r["note_id"]: json.loads(r["detail"])
         for r in repo.rows(
-            "SELECT note_id,detail FROM notes WHERE published_month=? AND detail!='{}'",
+            "SELECT note_id,detail FROM delivery_notes WHERE published_month=? AND detail!='{}'",
             (month,),
         )
         if json.loads(r["detail"]).get("source") == "xhs-downloader"
@@ -137,7 +137,7 @@ def sync_workspace(service):
     periods = {
         r["published_month"]
         for r in repo.rows(
-            "SELECT DISTINCT published_month FROM notes WHERE published_month IS NOT NULL"
+            "SELECT DISTINCT published_month FROM delivery_notes WHERE published_month IS NOT NULL"
         )
     } | {month}
     for period in periods:
