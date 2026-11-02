@@ -172,7 +172,11 @@ def build_review_report(repo, month, output, brand=None):
     if any(r["detail"].get("source") == "mock" for r in rows):
         delivery = "包含演示数据，不可交付"
     for values in [
-        ["报告月份", month, "按笔记实际发布时间归属月份"],
+        [
+            "报告月份",
+            month,
+            "默认按实际发布时间；用户明确指定的交付归属调整另行注明，保留真实发布时间",
+        ],
         ["交付状态", delivery, "系统不代替你审批或向上发送"],
         ["已登记笔记", len(unique), "去重笔记数；多品牌明细合计可能重复"],
         [

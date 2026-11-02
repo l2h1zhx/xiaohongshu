@@ -16,6 +16,15 @@ CREATE TABLE IF NOT EXISTS notes(
  detail TEXT NOT NULL DEFAULT '{}', published_at TEXT, published_month TEXT,
  warning TEXT
 );
+CREATE TABLE IF NOT EXISTS delivery_assignments(
+ note_id TEXT PRIMARY KEY REFERENCES notes(note_id),
+ month TEXT NOT NULL, reason TEXT NOT NULL, assigned_at TEXT NOT NULL
+);
+CREATE VIEW IF NOT EXISTS delivery_notes AS
+ SELECT n.note_id,n.url,n.first_submitted,n.detail,n.published_at,
+ COALESCE(a.month,n.published_month) AS published_month,n.warning,
+ n.published_month AS actual_published_month,a.reason AS assignment_reason
+ FROM notes n LEFT JOIN delivery_assignments a ON a.note_id=n.note_id;
 CREATE TABLE IF NOT EXISTS jobs(
  id INTEGER PRIMARY KEY, note_id TEXT NOT NULL REFERENCES notes(note_id),
  phase TEXT NOT NULL, phase_key TEXT NOT NULL, due TEXT NOT NULL, created_at TEXT NOT NULL,

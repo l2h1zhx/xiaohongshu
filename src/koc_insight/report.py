@@ -45,7 +45,7 @@ def _build_audit_report(repo, month, output, brand=None):
     output = Path(output)
     if output.exists():
         raise ValueError("报表已存在，请选择新的文件名，避免覆盖审核中的文件")
-    query = """SELECT n.*,s.brand,min(s.submitted_at) AS submitted_at FROM notes n
+    query = """SELECT n.*,s.brand,min(s.submitted_at) AS submitted_at FROM delivery_notes n
                JOIN submissions s ON s.note_id=n.note_id WHERE n.published_month=?"""
     params = [month]
     if brand:
